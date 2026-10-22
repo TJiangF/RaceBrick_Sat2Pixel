@@ -91,6 +91,42 @@ def healthz():
     return {"status": "ok", "version": "0.2.0"}
 
 
+@app.get("/api/inputtips")
+def inputtips(keywords: str):
+    if not AMAP_WEB_KEY:
+        return JSONResponse(
+            {"code": "NO_KEY", "message": "AMAP_WEB_KEY is not configured"},
+            status_code=500,
+        )
+    url = "https://restapi.amap.com/v3/assistant/inputtips?" + urllib.parse.urlencode(
+        {"keywords": keywords, "key": AMAP_WEB_KEY, "citylimit": "false", "output": "JSON"}
+    )
+    try:
+        with urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(
+            {"code": "INPUTTIPS_FAILED", "message": str(exc)}, status_code=502
+        )
+
+    tips = []
+    for t in data.get("tips") or []:
+        loc = t.get("location")
+        if not isinstance(loc, str) or not loc:
+            continue
+        lng, _, lat = loc.partition(",")
+        tips.append(
+            {
+                "name": t.get("name"),
+                "district": t.get("district"),
+                "address": t.get("address"),
+                "lng": float(lng),
+                "lat": float(lat),
+            }
+        )
+    return {"tips": tips}
+
+
 @app.get("/api/geocode")
 def geocode(address: str):
     if not AMAP_WEB_KEY:

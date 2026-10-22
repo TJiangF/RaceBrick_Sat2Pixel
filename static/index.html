@@ -25,7 +25,13 @@
   .block { margin-bottom: 18px; }
   .block h2 { font-size: 12px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .5px; margin: 0 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
-  #search { display: flex; gap: 6px; }
+  #search { display: flex; gap: 6px; position: relative; }
+  #suggest { position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: #14161a; border: 1px solid var(--border); border-radius: 6px;
+    max-height: 240px; overflow-y: auto; z-index: 20; display: none; }
+  .suggest-item { padding: 7px 10px; cursor: pointer; font-size: 13px; }
+  .suggest-item:hover, .suggest-item.active { background: #2a2f38; }
+  .suggest-item .d { color: var(--muted); font-size: 11px; margin-top: 1px; }
   #address { flex: 1; background: #14161a; border: 1px solid var(--border); color: var(--text);
     padding: 7px 9px; border-radius: 6px; font-size: 13px; }
   button { background: var(--accent); color: #fff; border: none; padding: 7px 12px;
@@ -61,8 +67,9 @@
     <div class="block">
       <h2>地址搜索</h2>
       <div id="search">
-        <input id="address" placeholder="输入地址，如：上海交通大学徐汇校区" />
+        <input id="address" placeholder="输入地址，如：上海交通大学徐汇校区" autocomplete="off" />
         <button id="go">搜索</button>
+        <div id="suggest"></div>
       </div>
     </div>
 
@@ -349,12 +356,76 @@
   }
   document.getElementById('detectWater').addEventListener('change', scheduleOverlay);
 
-  // search
+  // search + autocomplete
+  const addressEl = document.getElementById('address');
+  const suggestEl = document.getElementById('suggest');
+  let tips = [], active = -1;
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function hideSuggest() { suggestEl.style.display = 'none'; active = -1; }
+  function renderSuggest(list) {
+    tips = list; active = -1;
+    suggestEl.innerHTML = '';
+    if (!list.length) { hideSuggest(); return; }
+    list.forEach((t, i) => {
+      const d = document.createElement('div');
+      d.className = 'suggest-item';
+      const sub = [t.district, t.address].filter(Boolean).join(' · ');
+      d.innerHTML = '<div>' + escapeHtml(t.name) + '</div>' + (sub ? '<div class="d">' + escapeHtml(sub) + '</div>' : '');
+      d.addEventListener('mousedown', (e) => { e.preventDefault(); selectTip(t); });
+      d.addEventListener('mouseenter', () => setActive(i));
+      suggestEl.appendChild(d);
+    });
+    suggestEl.style.display = 'block';
+  }
+  function setActive(i) {
+    active = i;
+    Array.from(suggestEl.children).forEach((c, j) => c.classList.toggle('active', j === i));
+  }
+  function selectTip(t) {
+    addressEl.value = t.name;
+    hideSuggest();
+    state.lng = t.lng; state.lat = t.lat; state.zoom = 17;
+    draw(); scheduleOverlay();
+    document.getElementById('status').textContent = [t.district, t.address].filter(Boolean).join(' · ') || t.name;
+  }
+
   document.getElementById('go').addEventListener('click', doSearch);
-  document.getElementById('address').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+  let tipSeq = 0, tipDebounce = null;
+  addressEl.addEventListener('input', (e) => {
+    const kw = e.target.value.trim();
+    clearTimeout(tipDebounce);
+    if (!kw) { hideSuggest(); return; }
+    tipDebounce = setTimeout(async () => {
+      const my = ++tipSeq;
+      try {
+        const resp = await fetch('/api/inputtips?keywords=' + encodeURIComponent(kw));
+        const data = await resp.json();
+        if (my !== tipSeq) return;
+        renderSuggest(data.tips || []);
+      } catch (err) { hideSuggest(); }
+    }, 200);
+  });
+  addressEl.addEventListener('keydown', (e) => {
+    const open = suggestEl.style.display === 'block' && tips.length;
+    if (e.key === 'ArrowDown' && open) { e.preventDefault(); setActive((active + 1) % tips.length); }
+    else if (e.key === 'ArrowUp' && open) { e.preventDefault(); setActive((active - 1 + tips.length) % tips.length); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (open) selectTip(active >= 0 ? tips[active] : tips[0]);
+      else doSearch();
+    } else if (e.key === 'Escape') { hideSuggest(); }
+  });
+  document.addEventListener('mousedown', (e) => {
+    if (!document.getElementById('search').contains(e.target)) hideSuggest();
+  });
+
   async function doSearch() {
-    const addr = document.getElementById('address').value.trim();
+    const addr = addressEl.value.trim();
     if (!addr) return;
+    hideSuggest();
     document.getElementById('status').textContent = '搜索地址…';
     try {
       const resp = await fetch('/api/geocode?address=' + encodeURIComponent(addr));
