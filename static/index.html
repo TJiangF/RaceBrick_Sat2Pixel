@@ -97,9 +97,15 @@
 
     <div class="block">
       <h2>色彩分类</h2>
-      <div class="row"><label>植被阈值</label><input type="range" id="vegThreshold" min="-40" max="80" value="15" /><span class="val" id="vegThresholdVal">15</span></div>
-      <div class="row"><label>水体阈值</label><input type="range" id="waterThreshold" min="0" max="60" value="15" /><span class="val" id="waterThresholdVal">15</span></div>
-      <div class="row"><label>地面饱和上限</label><input type="range" id="groundSat" min="0" max="120" value="60" /><span class="val" id="groundSatVal">60</span></div>
+      <div class="row"><label>植被饱和阈值</label><input type="range" id="vegSat" min="0" max="50" value="10" /><span class="val" id="vegSatVal">10%</span></div>
+      <div class="row"><label>水体饱和阈值</label><input type="range" id="waterSat" min="0" max="50" value="20" /><span class="val" id="waterSatVal">20%</span></div>
+      <div class="row"><label>地面饱和上限</label><input type="range" id="groundSat" min="0" max="50" value="18" /><span class="val" id="groundSatVal">18%</span></div>
+    </div>
+
+    <div class="block">
+      <h2>去噪</h2>
+      <div class="row"><label>最小连通块</label><input type="range" id="minFragment" min="0" max="200" step="5" value="25" /><span class="val" id="minFragmentVal">25</span></div>
+      <div class="checkbox"><input type="checkbox" id="smooth" checked /> 3×3 多数投票平滑</div>
       <div class="checkbox"><input type="checkbox" id="detectWater" checked /> 识别水体（蓝色）</div>
     </div>
 
@@ -228,9 +234,11 @@
       blur: +document.getElementById('blur').value,
       edge_threshold: +document.getElementById('edgeThreshold').value,
       edge_thickness: +document.getElementById('edgeThickness').value,
-      veg_threshold: +document.getElementById('vegThreshold').value,
-      water_threshold: +document.getElementById('waterThreshold').value,
+      veg_sat: +document.getElementById('vegSat').value,
+      water_sat: +document.getElementById('waterSat').value,
       ground_sat: +document.getElementById('groundSat').value,
+      min_fragment: +document.getElementById('minFragment').value,
+      smooth: document.getElementById('smooth').checked,
       detect_water: document.getElementById('detectWater').checked,
       colors: {
         edge: document.getElementById('colorEdge').value,
@@ -343,18 +351,21 @@
   // sliders: reflect value + reprocess
   const bindings = [
     ['blur', 'blurVal'], ['edgeThreshold', 'edgeThresholdVal'],
-    ['edgeThickness', 'edgeThicknessVal'], ['vegThreshold', 'vegThresholdVal'],
-    ['waterThreshold', 'waterThresholdVal'], ['groundSat', 'groundSatVal'],
+    ['edgeThickness', 'edgeThicknessVal'],
+    ['vegSat', 'vegSatVal'], ['waterSat', 'waterSatVal'], ['groundSat', 'groundSatVal'],
+    ['minFragment', 'minFragmentVal'],
   ];
   for (const [id, valId] of bindings) {
     const el = document.getElementById(id), v = document.getElementById(valId);
-    v.textContent = el.value;
-    el.addEventListener('input', () => { v.textContent = el.value; scheduleOverlay(); });
+    const suffix = id === 'vegSat' || id === 'waterSat' || id === 'groundSat' ? '%' : '';
+    v.textContent = el.value + suffix;
+    el.addEventListener('input', () => { v.textContent = el.value + suffix; scheduleOverlay(); });
   }
   for (const id of ['colorEdge', 'colorVegetation', 'colorWater', 'colorGround', 'colorArtificial']) {
     document.getElementById(id).addEventListener('input', scheduleOverlay);
   }
   document.getElementById('detectWater').addEventListener('change', scheduleOverlay);
+  document.getElementById('smooth').addEventListener('change', scheduleOverlay);
 
   // search + autocomplete
   const addressEl = document.getElementById('address');
