@@ -4,9 +4,9 @@ import io
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import urllib.request
-
 from PIL import Image
+
+from sat2pixel.http import urlopen
 
 TILE_SIZE = 256
 MAX_ZOOM = 18  # AMap satellite imagery tops out at z18 in most regions
@@ -59,10 +59,7 @@ def _fetch_one(tile):
     last = None
     for _ in range(3):
         try:
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "RaceBrick_Sat2Pixel/0.1"}
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urlopen(url, timeout=15) as resp:
                 return x, y, resp.read()
         except Exception as exc:  # noqa: BLE001
             last = exc

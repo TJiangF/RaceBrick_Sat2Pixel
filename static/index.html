@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RaceBrick Sat2Pixel — 调试台</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1e2126; --border: #2c313a;
+    --text: #d7dae0; --muted: #8a919c; --accent: #3b82f6;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  #app { display: flex; height: 100vh; }
+  #map-wrap { flex: 1; position: relative; overflow: hidden; cursor: grab; }
+  #map-wrap.dragging { cursor: grabbing; }
+  canvas { position: absolute; inset: 0; }
+  #hud { position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,.55);
+    color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 6px; pointer-events: none; }
+  #sidebar { width: 320px; background: var(--panel); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 16px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+  .block { margin-bottom: 18px; }
+  .block h2 { font-size: 12px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .5px; margin: 0 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  #search { display: flex; gap: 6px; }
+  #address { flex: 1; background: #14161a; border: 1px solid var(--border); color: var(--text);
+    padding: 7px 9px; border-radius: 6px; font-size: 13px; }
+  button { background: var(--accent); color: #fff; border: none; padding: 7px 12px;
+    border-radius: 6px; font-size: 13px; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-bottom: 8px; font-size: 13px; }
+  .row label { color: var(--muted); min-width: 104px; }
+  .row .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  input[type=color] { width: 40px; height: 26px; border: 1px solid var(--border); border-radius: 4px;
+    background: #14161a; padding: 1px; cursor: pointer; }
+  .checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .checkbox input { accent-color: var(--accent); }
+  #legend { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+  .lg { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .lg .n { flex: 1; color: var(--muted); }
+  .lg .c { color: var(--text); font-variant-numeric: tabular-nums; }
+  #status { font-size: 11px; color: var(--muted); margin-top: 8px; min-height: 14px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map-wrap">
+    <canvas id="map"></canvas>
+    <div id="hud">加载中…</div>
+  </div>
+  <div id="sidebar">
+    <h1>RaceBrick Sat2Pixel</h1>
+    <div class="sub">边缘提取 + 固定色彩映射 调试台（拖动地图 / 滚轮缩放）</div>
+
+    <div class="block">
+      <h2>地址搜索</h2>
+      <div id="search">
+        <input id="address" placeholder="输入地址，如：上海交通大学徐汇校区" />
+        <button id="go">搜索</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>显示</h2>
+      <div class="checkbox" style="margin-bottom:8px">
+        <input type="checkbox" id="showOverlay" checked /> 显示处理结果
+      </div>
+      <div class="row">
+        <label>透明度</label>
+        <input type="range" id="opacity" min="0" max="100" value="100" />
+        <span class="val" id="opacityVal">100%</span>
+      </div>
+      <div class="checkbox">
+        <input type="checkbox" id="baseLabels" /> 底图叠加路网标注
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>边缘提取</h2>
+      <div class="row"><label>高斯模糊</label><input type="range" id="blur" min="0" max="4" step="1" value="0" /><span class="val" id="blurVal">0</span></div>
+      <div class="row"><label>边缘阈值</label><input type="range" id="edgeThreshold" min="0" max="100" value="15" /><span class="val" id="edgeThresholdVal">15</span></div>
+      <div class="row"><label>边缘加粗</label><input type="range" id="edgeThickness" min="0" max="5" step="1" value="1" /><span class="val" id="edgeThicknessVal">1</span></div>
+    </div>
+
+    <div class="block">
+      <h2>色彩分类</h2>
+      <div class="row"><label>植被阈值</label><input type="range" id="vegThreshold" min="-40" max="80" value="15" /><span class="val" id="vegThresholdVal">15</span></div>
+      <div class="row"><label>水体阈值</label><input type="range" id="waterThreshold" min="0" max="60" value="15" /><span class="val" id="waterThresholdVal">15</span></div>
+      <div class="row"><label>地面饱和上限</label><input type="range" id="groundSat" min="0" max="120" value="60" /><span class="val" id="groundSatVal">60</span></div>
+      <div class="checkbox"><input type="checkbox" id="detectWater" checked /> 识别水体（蓝色）</div>
+    </div>
+
+    <div class="block">
+      <h2>颜色映射</h2>
+      <div class="row"><label>边缘</label><input type="color" id="colorEdge" value="#000000" /></div>
+      <div class="row"><label>植被</label><input type="color" id="colorVegetation" value="#2ECC40" /></div>
+      <div class="row"><label>水体</label><input type="color" id="colorWater" value="#0074D9" /></div>
+      <div class="row"><label>地面</label><input type="color" id="colorGround" value="#9B9B9B" /></div>
+      <div class="row"><label>人工/其他</label><input type="color" id="colorArtificial" value="#FFC107" /></div>
+    </div>
+
+    <div class="block">
+      <h2>图例（像素占比）</h2>
+      <div id="legend"></div>
+      <div id="status"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('map');
+  const ctx = canvas.getContext('2d');
+  const wrap = document.getElementById('map-wrap');
+  const hud = document.getElementById('hud');
+
+  const state = {
+    lng: 121.43375,
+    lat: 31.19875,
+    zoom: 17,
+    baseStyle: 6,
+    overlay: null,      // Image
+    showOverlay: true,
+    opacity: 1.0,
+  };
+  const tiles = new Map();   // key -> {img, loaded}
+  const MAX_TILES = 400;
+  let overlayUrl = null;
+
+  function worldX(lng) { return (lng + 180) / 360; }
+  function worldY(lat) {
+    const r = lat * Math.PI / 180;
+    return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
+  }
+  function lngFromWorld(x) { return x * 360 - 180; }
+  function latFromWorld(y) {
+    const n = Math.PI * (1 - 2 * y);
+    return (180 / Math.PI) * (2 * Math.atan(Math.exp(n)) - Math.PI / 2);
+  }
+  const scale = () => 256 * Math.pow(2, state.zoom);
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { w, h };
+  }
+
+  function viewport() {
+    const { w, h } = resize();
+    const cx = worldX(state.lng) * scale();
+    const cy = worldY(state.lat) * scale();
+    return { w, h, topLeftX: cx - w / 2, topLeftY: cy - h / 2 };
+  }
+
+  function tileKey(z, x, y) { return z + '/' + x + '/' + y; }
+
+  function ensureTile(z, x, y) {
+    const key = tileKey(z, x, y);
+    let t = tiles.get(key);
+    if (t) { tiles.delete(key); tiles.set(key, t); return t; }
+    t = { img: new Image(), loaded: false };
+    t.img.onload = () => { t.loaded = true; draw(); };
+    t.img.src = 'https://webst0' + (((x + y) % 4) + 1) + '.is.autonavi.com/appmaptile?style=' +
+      state.baseStyle + '&x=' + x + '&y=' + y + '&z=' + z;
+    tiles.set(key, t);
+    if (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value);
+    return t;
+  }
+
+  function draw() {
+    const { w, h, topLeftX, topLeftY } = viewport();
+    ctx.clearRect(0, 0, w, h);
+
+    const z = state.zoom;
+    const x0 = Math.floor(topLeftX / 256), x1 = Math.floor((topLeftX + w) / 256);
+    const y0 = Math.floor(topLeftY / 256), y1 = Math.floor((topLeftY + h) / 256);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const t = ensureTile(z, x, y);
+        if (t.loaded) ctx.drawImage(t.img, x * 256 - topLeftX, y * 256 - topLeftY, 256, 256);
+      }
+    }
+
+    if (state.showOverlay && state.overlay) {
+      ctx.globalAlpha = state.opacity;
+      ctx.drawImage(state.overlay, 0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+
+    hud.textContent = '中心 ' + state.lng.toFixed(5) + ', ' + state.lat.toFixed(5) +
+      ' · zoom ' + state.zoom;
+  }
+
+  function corners() {
+    const { w, h, topLeftX, topLeftY } = viewport();
+    const nwLng = lngFromWorld(topLeftX / scale());
+    const nwLat = latFromWorld(topLeftY / scale());
+    const seLng = lngFromWorld((topLeftX + w) / scale());
+    const seLat = latFromWorld((topLeftY + h) / scale());
+    return [
+      { lng: nwLng, lat: seLat },  // SW
+      { lng: seLng, lat: seLat },  // SE
+      { lng: seLng, lat: nwLat },  // NE
+      { lng: nwLng, lat: nwLat },  // NW
+    ];
+  }
+
+  function params() {
+    return {
+      blur: +document.getElementById('blur').value,
+      edge_threshold: +document.getElementById('edgeThreshold').value,
+      edge_thickness: +document.getElementById('edgeThickness').value,
+      veg_threshold: +document.getElementById('vegThreshold').value,
+      water_threshold: +document.getElementById('waterThreshold').value,
+      ground_sat: +document.getElementById('groundSat').value,
+      detect_water: document.getElementById('detectWater').checked,
+      colors: {
+        edge: document.getElementById('colorEdge').value,
+        vegetation: document.getElementById('colorVegetation').value,
+        water: document.getElementById('colorWater').value,
+        ground: document.getElementById('colorGround').value,
+        artificial: document.getElementById('colorArtificial').value,
+      },
+    };
+  }
+
+  let reqSeq = 0;
+  async function requestOverlay() {
+    const mySeq = ++reqSeq;
+    const body = { corners: corners(), zoom: state.zoom, params: params() };
+    document.getElementById('status').textContent = '处理中…';
+    try {
+      const resp = await fetch('/api/debug', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (mySeq !== reqSeq) return;
+      if (!resp.ok) { document.getElementById('status').textContent = '错误 ' + resp.status; return; }
+      const blob = await resp.blob();
+      if (mySeq !== reqSeq) return;
+      if (overlayUrl) URL.revokeObjectURL(overlayUrl);
+      overlayUrl = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => { state.overlay = img; draw(); };
+      img.src = overlayUrl;
+      updateLegend(resp.headers.get('X-Sat2Pixel-Classes'));
+      document.getElementById('status').textContent = '完成 ' + state.zoom;
+    } catch (e) {
+      if (mySeq === reqSeq) document.getElementById('status').textContent = '请求失败';
+    }
+  }
+
+  function updateLegend(header) {
+    const map = { edge: '边缘', vegetation: '植被', water: '水体', ground: '地面', artificial: '人工' };
+    const colors = { edge: '#000000', vegetation: '#2ECC40', water: '#0074D9',
+      ground: '#9B9B9B', artificial: '#FFC107' };
+    const colorsEl = { edge: 'colorEdge', vegetation: 'colorVegetation', water: 'colorWater',
+      ground: 'colorGround', artificial: 'colorArtificial' };
+    const legend = document.getElementById('legend');
+    if (!header) return;
+    const parts = header.split(',');
+    let total = 0;
+    const vals = {};
+    for (const p of parts) {
+      const [k, v] = p.split('=');
+      if (k === 'total') { total = +v; } else vals[k] = +v;
+    }
+    legend.innerHTML = '';
+    for (const k of ['edge', 'vegetation', 'water', 'ground', 'artificial']) {
+      const color = document.getElementById(colorsEl[k]).value;
+      const pct = total ? (100 * vals[k] / total).toFixed(1) : '0.0';
+      const row = document.createElement('div');
+      row.className = 'lg';
+      row.innerHTML = '<span class="swatch" style="background:' + color + '"></span>' +
+        '<span class="n">' + map[k] + '</span><span class="c">' + pct + '%</span>';
+      legend.appendChild(row);
+    }
+  }
+
+  let debounce = null;
+  function scheduleOverlay() {
+    clearTimeout(debounce);
+    debounce = setTimeout(requestOverlay, 150);
+  }
+
+  // pan / zoom
+  let dragging = false, lastX = 0, lastY = 0;
+  wrap.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    wrap.classList.add('dragging'); wrap.setPointerCapture(e.pointerId);
+  });
+  wrap.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    const { w, h } = viewport();
+    state.lng = lngFromWorld((worldX(state.lng) * scale() - dx) / scale());
+    const cy = worldY(state.lat) * scale() - dy;
+    state.lat = latFromWorld(cy / scale());
+    draw();
+  });
+  wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); scheduleOverlay(); });
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const next = Math.max(2, Math.min(18, state.zoom + (e.deltaY < 0 ? 1 : -1)));
+    if (next === state.zoom) return;
+    state.zoom = next;
+    draw();
+    scheduleOverlay();
+  }, { passive: false });
+
+  document.getElementById('showOverlay').addEventListener('change', (e) => {
+    state.showOverlay = e.target.checked; draw();
+  });
+  document.getElementById('opacity').addEventListener('input', (e) => {
+    state.opacity = +e.target.value / 100;
+    document.getElementById('opacityVal').textContent = e.target.value + '%';
+    draw();
+  });
+  document.getElementById('baseLabels').addEventListener('change', (e) => {
+    state.baseStyle = e.target.checked ? 8 : 6;
+    tiles.clear(); draw();
+  });
+
+  // sliders: reflect value + reprocess
+  const bindings = [
+    ['blur', 'blurVal'], ['edgeThreshold', 'edgeThresholdVal'],
+    ['edgeThickness', 'edgeThicknessVal'], ['vegThreshold', 'vegThresholdVal'],
+    ['waterThreshold', 'waterThresholdVal'], ['groundSat', 'groundSatVal'],
+  ];
+  for (const [id, valId] of bindings) {
+    const el = document.getElementById(id), v = document.getElementById(valId);
+    v.textContent = el.value;
+    el.addEventListener('input', () => { v.textContent = el.value; scheduleOverlay(); });
+  }
+  for (const id of ['colorEdge', 'colorVegetation', 'colorWater', 'colorGround', 'colorArtificial']) {
+    document.getElementById(id).addEventListener('input', scheduleOverlay);
+  }
+  document.getElementById('detectWater').addEventListener('change', scheduleOverlay);
+
+  // search
+  document.getElementById('go').addEventListener('click', doSearch);
+  document.getElementById('address').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+  async function doSearch() {
+    const addr = document.getElementById('address').value.trim();
+    if (!addr) return;
+    document.getElementById('status').textContent = '搜索地址…';
+    try {
+      const resp = await fetch('/api/geocode?address=' + encodeURIComponent(addr));
+      const data = await resp.json();
+      if (!resp.ok) { document.getElementById('status').textContent = data.message || '未找到'; return; }
+      state.lng = data.lng; state.lat = data.lat; state.zoom = 17;
+      draw(); scheduleOverlay();
+      document.getElementById('status').textContent = data.formatted || addr;
+    } catch (e) {
+      document.getElementById('status').textContent = '搜索失败';
+    }
+  }
+
+  window.addEventListener('resize', () => { resize(); draw(); scheduleOverlay(); });
+  resize();
+  draw();
+  scheduleOverlay();
+})();
+</script>
+</body>
+</html>
