@@ -18,6 +18,11 @@
   canvas { position: absolute; inset: 0; }
   #hud { position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,.55);
     color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 6px; pointer-events: none; }
+  #zoom { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; }
+  #zoom button { width: 34px; height: 34px; font-size: 20px; line-height: 1;
+    background: rgba(0,0,0,.55); color: #fff; border: 1px solid rgba(255,255,255,.2);
+    border-radius: 6px; cursor: pointer; padding: 0; }
+  #zoom button:hover { background: rgba(59,130,246,.8); }
   #sidebar { width: 330px; background: var(--panel); border-left: 1px solid var(--border);
     overflow-y: auto; padding: 16px; }
   h1 { font-size: 15px; margin: 0 0 4px; }
@@ -60,6 +65,10 @@
   <div id="map-wrap">
     <canvas id="map"></canvas>
     <div id="hud">加载中…</div>
+    <div id="zoom">
+      <button id="zoomIn" title="放大">+</button>
+      <button id="zoomOut" title="缩小">−</button>
+    </div>
   </div>
   <div id="sidebar">
     <h1>RaceBrick Sat2Pixel</h1>
@@ -316,8 +325,16 @@
 
   // pan / zoom
   let dragging = false, lastX = 0, lastY = 0;
-  const WHEEL_STEP = 120;   // px of scroll per zoom level (higher = less sensitive)
-  let wheelAcc = 0;
+
+  function zoomBy(dir) {
+    const next = Math.max(2, Math.min(18, state.zoom + dir));
+    if (next === state.zoom) return;
+    state.zoom = next;
+    draw();
+    schedulePreview();
+  }
+  document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1));
+  document.getElementById('zoomOut').addEventListener('click', () => zoomBy(-1));
   wrap.addEventListener('pointerdown', (e) => {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
     wrap.classList.add('dragging'); wrap.setPointerCapture(e.pointerId);
@@ -331,20 +348,6 @@
     draw();
   });
   wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); schedulePreview(); });
-  wrap.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    wheelAcc += e.deltaY;
-    let changed = false;
-    while (Math.abs(wheelAcc) >= WHEEL_STEP) {
-      const dir = wheelAcc > 0 ? -1 : 1;   // scroll down -> zoom out
-      wheelAcc -= dir * WHEEL_STEP;
-      const next = Math.max(2, Math.min(18, state.zoom + dir));
-      if (next === state.zoom) { wheelAcc = 0; break; }
-      state.zoom = next;
-      changed = true;
-    }
-    if (changed) { draw(); schedulePreview(); }
-  }, { passive: false });
 
   document.getElementById('showOverlay').addEventListener('change', (e) => {
     state.showOverlay = e.target.checked; draw();
