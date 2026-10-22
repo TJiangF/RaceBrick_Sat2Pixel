@@ -1,9 +1,9 @@
 """RaceBrick_Sat2Pixel HTTP service.
 
 - Production: POST /api/v1/satellite (ESP32 -> 4-color 2bpp image)
-- Debug UI:   GET  /  (interactive map + semantic color mapping tuner)
+- Debug UI:   GET  /  (interactive map + 240x240 downsampling preview)
 - Geocode:    GET  /api/geocode?address=...
-- Debug pipe: POST /api/debug (bbox + params -> semantic color PNG)
+- Preview:    POST /api/preview (bbox + options -> downsampled image)
 """
 
 import io
@@ -19,13 +19,13 @@ from pydantic import BaseModel, Field, ValidationError
 
 from sat2pixel.http import urlopen
 from sat2pixel.mosaic import fetch_satellite
-from sat2pixel.process import classify_counts, process
+from sat2pixel.preview import downsample, encode, stats
 from sat2pixel.quantize import encode_bin, quantize_4color
 from sat2pixel import protocol as P
 
 AMAP_WEB_KEY = os.environ.get("AMAP_WEB_KEY", "")
 
-app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.2.0")
+app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.3.0")
 
 # (device_id, seq) -> (expires_at, body, media_type, headers)
 _CACHE: dict = {}
@@ -80,15 +80,19 @@ class Corner(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0)
 
 
-class DebugRequest(BaseModel):
+class PreviewRequest(BaseModel):
     corners: list[Corner] = Field(..., min_length=4, max_length=4)
     zoom: int | None = Field(None, ge=2, le=18)
-    params: dict | None = None
+    max_size: int = Field(240, ge=16, le=1024)
+    method: str = Field("lanczos", pattern="^(lanczos|box|bilinear|nearest)$")
+    sharpen: float = Field(0.4, ge=0.0, le=3.0)
+    format: str = Field("png", pattern="^(png|jpeg|rgb565)$")
+    quality: int = Field(85, ge=1, le=100)
 
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0"}
 
 
 @app.get("/api/inputtips")
@@ -157,8 +161,8 @@ def geocode(address: str):
     }
 
 
-@app.post("/api/debug")
-async def debug(req: DebugRequest):
+@app.post("/api/preview")
+async def preview(req: PreviewRequest):
     corners = [c.model_dump() for c in req.corners]
     try:
         image, _ = _mosaic_get_or_fetch(corners, req.zoom)
@@ -169,19 +173,18 @@ async def debug(req: DebugRequest):
             status_code=502,
         )
 
-    params = req.params or {}
-    result = process(image, params)
-    counts = classify_counts(image, params)
-
-    buf = io.BytesIO()
-    result.save(buf, format="PNG", optimize=True)
+    small = downsample(image, req.max_size, req.method, req.sharpen)
+    st = stats(small, req.quality)
+    body, media_type = encode(small, req.format, req.quality)
 
     headers = {
-        "X-Sat2Pixel-Width": str(result.width),
-        "X-Sat2Pixel-Height": str(result.height),
-        "X-Sat2Pixel-Classes": ",".join(f"{k}={v}" for k, v in counts.items()),
+        "X-Preview-Width": str(st["width"]),
+        "X-Preview-Height": str(st["height"]),
+        "X-Preview-Png": str(st["png"]),
+        "X-Preview-Jpeg": str(st["jpeg"]),
+        "X-Preview-Rgb565": str(st["rgb565"]),
     }
-    return Response(content=buf.getvalue(), media_type="image/png", headers=headers)
+    return Response(content=body, media_type=media_type, headers=headers)
 
 
 @app.post("/api/v1/satellite")

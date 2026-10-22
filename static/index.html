@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>RaceBrick Sat2Pixel — 调试台</title>
+<title>RaceBrick Sat2Pixel — 240×240 压缩预览</title>
 <style>
   :root {
     --bg: #14161a; --panel: #1e2126; --border: #2c313a;
@@ -18,7 +18,7 @@
   canvas { position: absolute; inset: 0; }
   #hud { position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,.55);
     color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 6px; pointer-events: none; }
-  #sidebar { width: 320px; background: var(--panel); border-left: 1px solid var(--border);
+  #sidebar { width: 330px; background: var(--panel); border-left: 1px solid var(--border);
     overflow-y: auto; padding: 16px; }
   h1 { font-size: 15px; margin: 0 0 4px; }
   .sub { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
@@ -39,18 +39,19 @@
   button:hover { filter: brightness(1.1); }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
     margin-bottom: 8px; font-size: 13px; }
-  .row label { color: var(--muted); min-width: 104px; }
-  .row .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+  .row label { color: var(--muted); min-width: 80px; }
+  .row .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
   input[type=range] { flex: 1; accent-color: var(--accent); }
-  input[type=color] { width: 40px; height: 26px; border: 1px solid var(--border); border-radius: 4px;
-    background: #14161a; padding: 1px; cursor: pointer; }
-  .checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  select { flex: 1; background: #14161a; border: 1px solid var(--border); color: var(--text);
+    padding: 5px 8px; border-radius: 6px; font-size: 13px; }
+  .checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
   .checkbox input { accent-color: var(--accent); }
-  #legend { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
-  .lg { display: flex; align-items: center; gap: 8px; }
-  .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
-  .lg .n { flex: 1; color: var(--muted); }
-  .lg .c { color: var(--text); font-variant-numeric: tabular-nums; }
+  #previewWrap { position: relative; border: 1px solid var(--border); border-radius: 6px;
+    background: #0c0d0f; padding: 6px; }
+  #previewImg { width: 100%; display: block; image-rendering: pixelated; }
+  #previewStats { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+  .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .btns button { flex: 1; font-size: 12px; padding: 6px 8px; }
   #status { font-size: 11px; color: var(--muted); margin-top: 8px; min-height: 14px; }
 </style>
 </head>
@@ -62,7 +63,7 @@
   </div>
   <div id="sidebar">
     <h1>RaceBrick Sat2Pixel</h1>
-    <div class="sub">边缘提取 + 固定色彩映射 调试台（拖动地图 / 滚轮缩放）</div>
+    <div class="sub">卫星图 → ≤240×240 高效压缩（拖动地图 / 滚轮缩放）</div>
 
     <div class="block">
       <h2>地址搜索</h2>
@@ -75,52 +76,58 @@
 
     <div class="block">
       <h2>显示</h2>
-      <div class="checkbox" style="margin-bottom:8px">
-        <input type="checkbox" id="showOverlay" checked /> 显示处理结果
-      </div>
+      <div class="checkbox"><input type="checkbox" id="showOverlay" checked /> 叠加压缩结果</div>
       <div class="row">
         <label>透明度</label>
         <input type="range" id="opacity" min="0" max="100" value="100" />
         <span class="val" id="opacityVal">100%</span>
       </div>
-      <div class="checkbox">
-        <input type="checkbox" id="baseLabels" /> 底图叠加路网标注
+      <div class="checkbox"><input type="checkbox" id="baseLabels" /> 底图叠加路网标注</div>
+    </div>
+
+    <div class="block">
+      <h2>压缩</h2>
+      <div class="row">
+        <label>最大边长</label>
+        <input type="range" id="maxSize" min="64" max="480" step="8" value="240" />
+        <span class="val" id="maxSizeVal">240</span>
+      </div>
+      <div class="row"><label>缩放算法</label>
+        <select id="method">
+          <option value="lanczos" selected>Lanczos（最清晰）</option>
+          <option value="box">Box（面积平均）</option>
+          <option value="bilinear">Bilinear（双线性）</option>
+          <option value="nearest">Nearest（最近邻）</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>锐化</label>
+        <input type="range" id="sharpen" min="0" max="2.0" step="0.1" value="0.4" />
+        <span class="val" id="sharpenVal">0.4</span>
+      </div>
+      <div class="row"><label>格式</label>
+        <select id="format">
+          <option value="png" selected>PNG（无损）</option>
+          <option value="jpeg">JPEG（最小）</option>
+          <option value="rgb565">RGB565（MCU 直显）</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>JPEG 质量</label>
+        <input type="range" id="quality" min="1" max="100" value="85" />
+        <span class="val" id="qualityVal">85</span>
       </div>
     </div>
 
     <div class="block">
-      <h2>边缘提取</h2>
-      <div class="row"><label>高斯模糊</label><input type="range" id="blur" min="0" max="4" step="1" value="0" /><span class="val" id="blurVal">0</span></div>
-      <div class="row"><label>边缘阈值</label><input type="range" id="edgeThreshold" min="0" max="100" value="15" /><span class="val" id="edgeThresholdVal">15</span></div>
-      <div class="row"><label>边缘加粗</label><input type="range" id="edgeThickness" min="0" max="5" step="1" value="1" /><span class="val" id="edgeThicknessVal">1</span></div>
-    </div>
-
-    <div class="block">
-      <h2>色彩分类</h2>
-      <div class="row"><label>植被饱和阈值</label><input type="range" id="vegSat" min="0" max="50" value="10" /><span class="val" id="vegSatVal">10%</span></div>
-      <div class="row"><label>水体饱和阈值</label><input type="range" id="waterSat" min="0" max="50" value="20" /><span class="val" id="waterSatVal">20%</span></div>
-      <div class="row"><label>地面饱和上限</label><input type="range" id="groundSat" min="0" max="50" value="18" /><span class="val" id="groundSatVal">18%</span></div>
-    </div>
-
-    <div class="block">
-      <h2>去噪</h2>
-      <div class="row"><label>最小连通块</label><input type="range" id="minFragment" min="0" max="200" step="5" value="25" /><span class="val" id="minFragmentVal">25</span></div>
-      <div class="checkbox"><input type="checkbox" id="smooth" checked /> 3×3 多数投票平滑</div>
-      <div class="checkbox"><input type="checkbox" id="detectWater" checked /> 识别水体（蓝色）</div>
-    </div>
-
-    <div class="block">
-      <h2>颜色映射</h2>
-      <div class="row"><label>边缘</label><input type="color" id="colorEdge" value="#000000" /></div>
-      <div class="row"><label>植被</label><input type="color" id="colorVegetation" value="#2ECC40" /></div>
-      <div class="row"><label>水体</label><input type="color" id="colorWater" value="#0074D9" /></div>
-      <div class="row"><label>地面</label><input type="color" id="colorGround" value="#9B9B9B" /></div>
-      <div class="row"><label>人工/其他</label><input type="color" id="colorArtificial" value="#FFC107" /></div>
-    </div>
-
-    <div class="block">
-      <h2>图例（像素占比）</h2>
-      <div id="legend"></div>
+      <h2>预览</h2>
+      <div id="previewWrap"><img id="previewImg" alt="preview" /></div>
+      <div id="previewStats">—</div>
+      <div class="btns">
+        <button id="dlPng">PNG</button>
+        <button id="dlJpeg">JPEG</button>
+        <button id="dlRgb565">RGB565</button>
+      </div>
       <div id="status"></div>
     </div>
   </div>
@@ -138,13 +145,13 @@
     lat: 31.19875,
     zoom: 17,
     baseStyle: 6,
-    overlay: null,      // Image
+    overlay: null,
     showOverlay: true,
     opacity: 1.0,
   };
-  const tiles = new Map();   // key -> {img, loaded}
+  const tiles = new Map();
   const MAX_TILES = 400;
-  let overlayUrl = null;
+  let overlayUrl = null, previewUrl = null;
 
   function worldX(lng) { return (lng + 180) / 360; }
   function worldY(lat) {
@@ -177,7 +184,6 @@
   }
 
   function tileKey(z, x, y) { return z + '/' + x + '/' + y; }
-
   function ensureTile(z, x, y) {
     const key = tileKey(z, x, y);
     let t = tiles.get(key);
@@ -194,7 +200,6 @@
   function draw() {
     const { w, h, topLeftX, topLeftY } = viewport();
     ctx.clearRect(0, 0, w, h);
-
     const z = state.zoom;
     const x0 = Math.floor(topLeftX / 256), x1 = Math.floor((topLeftX + w) / 256);
     const y0 = Math.floor(topLeftY / 256), y1 = Math.floor((topLeftY + h) / 256);
@@ -204,15 +209,12 @@
         if (t.loaded) ctx.drawImage(t.img, x * 256 - topLeftX, y * 256 - topLeftY, 256, 256);
       }
     }
-
     if (state.showOverlay && state.overlay) {
       ctx.globalAlpha = state.opacity;
       ctx.drawImage(state.overlay, 0, 0, w, h);
       ctx.globalAlpha = 1;
     }
-
-    hud.textContent = '中心 ' + state.lng.toFixed(5) + ', ' + state.lat.toFixed(5) +
-      ' · zoom ' + state.zoom;
+    hud.textContent = '中心 ' + state.lng.toFixed(5) + ', ' + state.lat.toFixed(5) + ' · zoom ' + state.zoom;
   }
 
   function corners() {
@@ -222,91 +224,94 @@
     const seLng = lngFromWorld((topLeftX + w) / scale());
     const seLat = latFromWorld((topLeftY + h) / scale());
     return [
-      { lng: nwLng, lat: seLat },  // SW
-      { lng: seLng, lat: seLat },  // SE
-      { lng: seLng, lat: nwLat },  // NE
-      { lng: nwLng, lat: nwLat },  // NW
+      { lng: nwLng, lat: seLat },
+      { lng: seLng, lat: seLat },
+      { lng: seLng, lat: nwLat },
+      { lng: nwLng, lat: nwLat },
     ];
   }
 
-  function params() {
+  function options() {
     return {
-      blur: +document.getElementById('blur').value,
-      edge_threshold: +document.getElementById('edgeThreshold').value,
-      edge_thickness: +document.getElementById('edgeThickness').value,
-      veg_sat: +document.getElementById('vegSat').value,
-      water_sat: +document.getElementById('waterSat').value,
-      ground_sat: +document.getElementById('groundSat').value,
-      min_fragment: +document.getElementById('minFragment').value,
-      smooth: document.getElementById('smooth').checked,
-      detect_water: document.getElementById('detectWater').checked,
-      colors: {
-        edge: document.getElementById('colorEdge').value,
-        vegetation: document.getElementById('colorVegetation').value,
-        water: document.getElementById('colorWater').value,
-        ground: document.getElementById('colorGround').value,
-        artificial: document.getElementById('colorArtificial').value,
-      },
+      max_size: +document.getElementById('maxSize').value,
+      method: document.getElementById('method').value,
+      sharpen: +document.getElementById('sharpen').value,
+      quality: +document.getElementById('quality').value,
     };
   }
 
+  function fmtBytes(n) {
+    if (n >= 1024) return (n / 1024).toFixed(1) + 'KB';
+    return n + 'B';
+  }
+
   let reqSeq = 0;
-  async function requestOverlay() {
+  async function requestPreview(format) {
     const mySeq = ++reqSeq;
-    const body = { corners: corners(), zoom: state.zoom, params: params() };
+    const body = Object.assign({ corners: corners(), zoom: state.zoom }, options());
+    if (format) body.format = format;
     document.getElementById('status').textContent = '处理中…';
     try {
-      const resp = await fetch('/api/debug', {
+      const resp = await fetch('/api/preview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (mySeq !== reqSeq) return;
-      if (!resp.ok) { document.getElementById('status').textContent = '错误 ' + resp.status; return; }
+      if (mySeq !== reqSeq) return null;
+      if (!resp.ok) { document.getElementById('status').textContent = '错误 ' + resp.status; return null; }
       const blob = await resp.blob();
-      if (mySeq !== reqSeq) return;
-      if (overlayUrl) URL.revokeObjectURL(overlayUrl);
-      overlayUrl = URL.createObjectURL(blob);
+      if (mySeq !== reqSeq) return null;
+      const w = resp.headers.get('X-Preview-Width');
+      const h = resp.headers.get('X-Preview-Height');
+      const png = resp.headers.get('X-Preview-Png');
+      const jpeg = resp.headers.get('X-Preview-Jpeg');
+      const rgb565 = resp.headers.get('X-Preview-Rgb565');
+
+      if (format) {
+        document.getElementById('status').textContent = '已下载 ' + w + '×' + h;
+        return blob;
+      }
+
+      // preview (PNG)
+      const url = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = () => { state.overlay = img; draw(); };
-      img.src = overlayUrl;
-      updateLegend(resp.headers.get('X-Sat2Pixel-Classes'));
-      document.getElementById('status').textContent = '完成 ' + state.zoom;
+      img.src = url;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = url;
+      document.getElementById('previewImg').src = url;
+      document.getElementById('previewStats').innerHTML =
+        '<b>' + w + '×' + h + '</b> · PNG ' + fmtBytes(+png) +
+        ' · JPEG ' + fmtBytes(+jpeg) + ' · RGB565 ' + fmtBytes(+rgb565);
+      document.getElementById('status').textContent = '完成 · zoom ' + state.zoom;
+      return blob;
     } catch (e) {
       if (mySeq === reqSeq) document.getElementById('status').textContent = '请求失败';
+      return null;
     }
   }
 
-  function updateLegend(header) {
-    const map = { edge: '边缘', vegetation: '植被', water: '水体', ground: '地面', artificial: '人工' };
-    const colors = { edge: '#000000', vegetation: '#2ECC40', water: '#0074D9',
-      ground: '#9B9B9B', artificial: '#FFC107' };
-    const colorsEl = { edge: 'colorEdge', vegetation: 'colorVegetation', water: 'colorWater',
-      ground: 'colorGround', artificial: 'colorArtificial' };
-    const legend = document.getElementById('legend');
-    if (!header) return;
-    const parts = header.split(',');
-    let total = 0;
-    const vals = {};
-    for (const p of parts) {
-      const [k, v] = p.split('=');
-      if (k === 'total') { total = +v; } else vals[k] = +v;
-    }
-    legend.innerHTML = '';
-    for (const k of ['edge', 'vegetation', 'water', 'ground', 'artificial']) {
-      const color = document.getElementById(colorsEl[k]).value;
-      const pct = total ? (100 * vals[k] / total).toFixed(1) : '0.0';
-      const row = document.createElement('div');
-      row.className = 'lg';
-      row.innerHTML = '<span class="swatch" style="background:' + color + '"></span>' +
-        '<span class="n">' + map[k] + '</span><span class="c">' + pct + '%</span>';
-      legend.appendChild(row);
-    }
+  function download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
+  document.getElementById('dlPng').addEventListener('click', async () => {
+    const b = await requestPreview('png'); if (b) download(b, 'sat2pixel.png');
+  });
+  document.getElementById('dlJpeg').addEventListener('click', async () => {
+    const b = await requestPreview('jpeg'); if (b) download(b, 'sat2pixel.jpg');
+  });
+  document.getElementById('dlRgb565').addEventListener('click', async () => {
+    const b = await requestPreview('rgb565'); if (b) download(b, 'sat2pixel.rgb565');
+  });
 
   let debounce = null;
-  function scheduleOverlay() {
+  function schedulePreview() {
     clearTimeout(debounce);
-    debounce = setTimeout(requestOverlay, 150);
+    debounce = setTimeout(() => requestPreview(), 150);
   }
 
   // pan / zoom
@@ -319,20 +324,18 @@
     if (!dragging) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
-    const { w, h } = viewport();
     state.lng = lngFromWorld((worldX(state.lng) * scale() - dx) / scale());
-    const cy = worldY(state.lat) * scale() - dy;
-    state.lat = latFromWorld(cy / scale());
+    state.lat = latFromWorld((worldY(state.lat) * scale() - dy) / scale());
     draw();
   });
-  wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); scheduleOverlay(); });
+  wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); schedulePreview(); });
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
     const next = Math.max(2, Math.min(18, state.zoom + (e.deltaY < 0 ? 1 : -1)));
     if (next === state.zoom) return;
     state.zoom = next;
     draw();
-    scheduleOverlay();
+    schedulePreview();
   }, { passive: false });
 
   document.getElementById('showOverlay').addEventListener('change', (e) => {
@@ -348,24 +351,16 @@
     tiles.clear(); draw();
   });
 
-  // sliders: reflect value + reprocess
   const bindings = [
-    ['blur', 'blurVal'], ['edgeThreshold', 'edgeThresholdVal'],
-    ['edgeThickness', 'edgeThicknessVal'],
-    ['vegSat', 'vegSatVal'], ['waterSat', 'waterSatVal'], ['groundSat', 'groundSatVal'],
-    ['minFragment', 'minFragmentVal'],
+    ['maxSize', 'maxSizeVal'], ['sharpen', 'sharpenVal'], ['quality', 'qualityVal'],
   ];
   for (const [id, valId] of bindings) {
     const el = document.getElementById(id), v = document.getElementById(valId);
-    const suffix = id === 'vegSat' || id === 'waterSat' || id === 'groundSat' ? '%' : '';
-    v.textContent = el.value + suffix;
-    el.addEventListener('input', () => { v.textContent = el.value + suffix; scheduleOverlay(); });
+    v.textContent = el.value;
+    el.addEventListener('input', () => { v.textContent = el.value; schedulePreview(); });
   }
-  for (const id of ['colorEdge', 'colorVegetation', 'colorWater', 'colorGround', 'colorArtificial']) {
-    document.getElementById(id).addEventListener('input', scheduleOverlay);
-  }
-  document.getElementById('detectWater').addEventListener('change', scheduleOverlay);
-  document.getElementById('smooth').addEventListener('change', scheduleOverlay);
+  document.getElementById('method').addEventListener('change', schedulePreview);
+  document.getElementById('format').addEventListener('change', schedulePreview);
 
   // search + autocomplete
   const addressEl = document.getElementById('address');
@@ -399,7 +394,7 @@
     addressEl.value = t.name;
     hideSuggest();
     state.lng = t.lng; state.lat = t.lat; state.zoom = 17;
-    draw(); scheduleOverlay();
+    draw(); schedulePreview();
     document.getElementById('status').textContent = [t.district, t.address].filter(Boolean).join(' · ') || t.name;
   }
 
@@ -443,17 +438,17 @@
       const data = await resp.json();
       if (!resp.ok) { document.getElementById('status').textContent = data.message || '未找到'; return; }
       state.lng = data.lng; state.lat = data.lat; state.zoom = 17;
-      draw(); scheduleOverlay();
+      draw(); schedulePreview();
       document.getElementById('status').textContent = data.formatted || addr;
     } catch (e) {
       document.getElementById('status').textContent = '搜索失败';
     }
   }
 
-  window.addEventListener('resize', () => { resize(); draw(); scheduleOverlay(); });
+  window.addEventListener('resize', () => { resize(); draw(); schedulePreview(); });
   resize();
   draw();
-  scheduleOverlay();
+  schedulePreview();
 })();
 </script>
 </body>
