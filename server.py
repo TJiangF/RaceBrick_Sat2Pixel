@@ -1,12 +1,11 @@
 """RaceBrick_Sat2Pixel HTTP service.
 
-- Production: POST /api/v1/satellite (ESP32 -> 4-color 2bpp image)
-- Debug UI:   GET  /  (interactive map + 240x240 downsampling preview)
-- Geocode:    GET  /api/geocode?address=...
+- Production: POST /api/v1/satellite (ESP32 -> <=240x240 compressed image)
 - Preview:    POST /api/preview (bbox + options -> downsampled image)
+- Geocode:    GET  /api/geocode?address=...
+- Debug UI:   GET  /  (interactive map + 240x240 preview)
 """
 
-import io
 import json
 import os
 import time
@@ -20,12 +19,11 @@ from pydantic import BaseModel, Field, ValidationError
 from sat2pixel.http import urlopen
 from sat2pixel.mosaic import fetch_satellite
 from sat2pixel.preview import downsample, encode, stats
-from sat2pixel.quantize import encode_bin, quantize_4color
-from sat2pixel import protocol as P
+from sat2pixel.protocol import Corner, SatelliteRequest, DEDUP_TTL_S
 
 AMAP_WEB_KEY = os.environ.get("AMAP_WEB_KEY", "")
 
-app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.3.0")
+app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.4.0")
 
 # (device_id, seq) -> (expires_at, body, media_type, headers)
 _CACHE: dict = {}
@@ -46,7 +44,7 @@ def _cache_get(key):
 
 
 def _cache_put(key, body, media_type, headers):
-    _CACHE[key] = (time.time() + P.DEDUP_TTL_S, body, media_type, headers)
+    _CACHE[key] = (time.time() + DEDUP_TTL_S, body, media_type, headers)
     if len(_CACHE) > 512:
         for k in [k for k, v in _CACHE.items() if v[0] < time.time()]:
             _CACHE.pop(k, None)
@@ -71,15 +69,6 @@ def _mosaic_get_or_fetch(corners, zoom):
     return image, False
 
 
-def _palette_header(palette):
-    return ",".join("#{:02X}{:02X}{:02X}".format(*rgb) for rgb in palette)
-
-
-class Corner(BaseModel):
-    lng: float = Field(..., ge=-180.0, le=180.0)
-    lat: float = Field(..., ge=-90.0, le=90.0)
-
-
 class PreviewRequest(BaseModel):
     corners: list[Corner] = Field(..., min_length=4, max_length=4)
     zoom: int | None = Field(None, ge=2, le=18)
@@ -92,7 +81,7 @@ class PreviewRequest(BaseModel):
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.3.0"}
+    return {"status": "ok", "version": "0.4.0"}
 
 
 @app.get("/api/inputtips")
@@ -199,7 +188,7 @@ async def satellite(request: Request):
         )
 
     try:
-        req = P.SatelliteRequest(**body)
+        req = SatelliteRequest(**body)
     except ValidationError as exc:
         return Response(content=exc.json(), media_type="application/json", status_code=422)
 
@@ -211,7 +200,7 @@ async def satellite(request: Request):
 
     corners = [c.model_dump() for c in req.corners]
     try:
-        image, zoom, meta = fetch_satellite(corners, req.zoom)
+        image, _ = _mosaic_get_or_fetch(corners, None)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
@@ -219,23 +208,14 @@ async def satellite(request: Request):
             status_code=502,
         )
 
-    if req.format == "png":
-        indexed, palette = quantize_4color(image, req.palette)
-        buf = io.BytesIO()
-        indexed.save(buf, format="PNG", optimize=True)
-        body_bytes = buf.getvalue()
-        media_type = "image/png"
-    else:
-        body_bytes, palette = encode_bin(image, req.palette)
-        media_type = "application/octet-stream"
+    small = downsample(image, req.max_size)
+    body_bytes, media_type = encode(small, req.format)
 
     headers = {
         "X-Sat2Pixel-Seq": str(req.seq),
-        "X-Sat2Pixel-Width": str(image.width),
-        "X-Sat2Pixel-Height": str(image.height),
-        "X-Sat2Pixel-Zoom": str(zoom),
-        "X-Sat2Pixel-Tiles": str(meta["tile_count"]),
-        "X-Sat2Pixel-Palette": _palette_header(palette),
+        "X-Sat2Pixel-Width": str(small.width),
+        "X-Sat2Pixel-Height": str(small.height),
+        "X-Sat2Pixel-Size": str(len(body_bytes)),
     }
     _cache_put(key, body_bytes, media_type, headers)
     return Response(content=body_bytes, media_type=media_type, headers=headers)

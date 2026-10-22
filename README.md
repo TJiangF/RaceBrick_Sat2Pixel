@@ -17,8 +17,7 @@ RaceBrick_Sat2Pixel/
 ├── sat2pixel/
 │   ├── mosaic.py           # 高德卫星瓦片拉取 + 拼接 + 裁剪（自动 zoom / 空白降级）
 │   ├── preview.py          # 高质量缩放（Lanczos/锐化）+ RGB565/JPEG/PNG 编码
-│   ├── quantize.py         # 四色量化 + 2bpp 打包（旧方案，保留）
-│   ├── protocol.py         # 协议定义（请求模型 / 二进制格式 / 错误码）
+│   ├── protocol.py         # 协议定义（请求模型 / 错误码 / 重传策略）
 │   └── http.py             # 带 CA 兜底的 TLS 请求
 ├── static/
 │   └── index.html          # 预览台（可拖动地图 + 压缩参数 + 240×240 预览）
@@ -44,9 +43,8 @@ RaceBrick_Sat2Pixel/
     {"lng": 121.4350, "lat": 31.2000},
     {"lng": 121.4325, "lat": 31.2000}
   ],
-  "zoom": null,
-  "palette": "adaptive",
-  "format": "bin"
+  "max_size": 240,
+  "format": "rgb565"
 }
 ```
 
@@ -55,22 +53,19 @@ RaceBrick_Sat2Pixel/
 | `device_id` | string   | 是   | 设备唯一标识，1–64 字符                                     |
 | `seq`       | uint32   | 是   | 每设备单调递增，作为幂等键（用于重传去重）                    |
 | `corners`   | array[4] | 是   | 四个最边缘点坐标，顺序固定为 **SW, SE, NE, NW**（西南、东南、东北、西北） |
-| `zoom`      | int      | 否   | `2–18`，`null` 为自动选择（推荐）                           |
-| `palette`   | string   | 否   | 四色策略：`adaptive`（自适应，默认）/ `gray4`（固定四级灰度） |
-| `format`    | string   | 否   | 回传格式：`bin`（默认，2bpp 原始）/ `png`（四色索引 PNG）   |
+| `max_size`  | int      | 否   | 输出最长边（≤1024），默认 240                                |
+| `format`    | string   | 否   | 回传格式：`rgb565`（默认，MCU 直显）/ `png` / `jpeg`         |
 
 ### 响应（服务 → ESP32）
 
-成功返回 `HTTP 200`，响应体为图像数据；关键信息放在响应头，避免 ESP32 解析 JSON：
+成功返回 `HTTP 200`，响应体为压缩后的图像数据；关键信息放在响应头，避免 ESP32 解析 JSON：
 
 | 响应头                | 说明                                  |
 |-----------------------|---------------------------------------|
 | `X-Sat2Pixel-Seq`     | 回显 `seq`                             |
 | `X-Sat2Pixel-Width`   | 图像宽（像素）                          |
 | `X-Sat2Pixel-Height`  | 图像高（像素）                          |
-| `X-Sat2Pixel-Zoom`    | 实际使用的瓦片 zoom                       |
-| `X-Sat2Pixel-Tiles`   | 下载的瓦片数量                           |
-| `X-Sat2Pixel-Palette` | 四色色板 `#RRGGBB,#RRGGBB,#RRGGBB,#RRGGBB` |
+| `X-Sat2Pixel-Size`    | 图像字节数                              |
 
 失败返回非 200，响应体为 JSON：
 
@@ -80,16 +75,9 @@ RaceBrick_Sat2Pixel/
 
 错误码：`INVALID_JSON` / `INVALID_CORNERS`（422，附带字段校验信息）/ `TILE_FETCH_FAILED` / `INTERNAL`。
 
-### `bin` 二进制格式（2 bits/pixel）
+### `rgb565` 二进制格式
 
-| 偏移 | 大小 | 字段                                    |
-|------|------|-----------------------------------------|
-| 0    | 2    | `width`（uint16 大端）                    |
-| 2    | 2    | `height`（uint16 大端）                   |
-| 4    | 12   | 色板：4 个颜色，每个 RGB888（3 字节）      |
-| 16   | N    | 像素：每像素 2 bit，行主序，每行补齐到字节边界 |
-
-`N = height * ceil(width * 2 / 8)`。第 `i` 个像素值（0–3）为该行第 `i/4` 字节中从高位起的 2 bit。
+每像素 2 字节（大端），`R5 G6 B5`：`[RRRRRGGG][GGGBBBBB]`。总字节数 = `width × height × 2`。
 
 ### 失败重传机制
 
@@ -137,8 +125,6 @@ RaceBrick_Sat2Pixel/
 | JPEG（质量 85）      | 17.5 KB                                       |
 | RGB565（MCU 直显）   | 98.9 KB（206×240×2 字节）                       |
 
-> 对比图：`docs/sat2pixel_compare.png`（四色压缩，旧方案）。
-
 ## 部署
 
 服务端（阿里云轻量应用服务器）单向拉取仓库后运行：
@@ -162,17 +148,17 @@ uvicorn server:app --host 0.0.0.0 --port 2020
 ## 本地验证
 
 ```bash
-# 生产协议
+# 生产协议（RGB565，默认）
 curl -X POST http://127.0.0.1:2020/api/v1/satellite \
   -H 'Content-Type: application/json' \
   -d @examples/sample_bbox.json \
-  -o out.bin -D -
+  -o out.rgb565 -D -
 
-# 调试接口
-curl -X POST http://127.0.0.1:2020/api/debug \
+# 预览接口
+curl -X POST http://127.0.0.1:2020/api/preview \
   -H 'Content-Type: application/json' \
-  -d '{"corners":[{"lng":121.4325,"lat":31.1975},{"lng":121.4350,"lat":31.1975},{"lng":121.4350,"lat":31.2000},{"lng":121.4325,"lat":31.2000}],"zoom":18,"params":{"edge_threshold":15}}' \
-  -o debug.png -D -
+  -d '{"corners":[{"lng":121.4325,"lat":31.1975},{"lng":121.4350,"lat":31.1975},{"lng":121.4350,"lat":31.2000},{"lng":121.4325,"lat":31.2000}],"zoom":18,"max_size":240}' \
+  -o preview.png -D -
 ```
 
 ## 许可

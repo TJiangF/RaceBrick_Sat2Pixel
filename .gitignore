@@ -5,5 +5,4 @@ venv/
 .env
 *.bin
 *.png
-!docs/*.png
 .DS_Store

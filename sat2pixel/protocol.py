@@ -1,19 +1,7 @@
-"""Wire protocol definitions: request model, binary format, error codes."""
-
-from typing import List, Optional
+"""Wire protocol definitions: request model, error codes, retransmission policy."""
 
 from pydantic import BaseModel, Field
 
-# Binary .bin layout
-# offset  size  field
-# 0       2     width  (uint16 big-endian)
-# 2       2     height (uint16 big-endian)
-# 4       12    palette: 4 x RGB888 (12 bytes)
-# 16      N     pixels: 2 bits/pixel, row-major, each row padded to a byte
-HEADER_SIZE = 16
-
-# Error codes
-ERR_OK = "OK"
 ERR_INVALID_JSON = "INVALID_JSON"
 ERR_INVALID_CORNERS = "INVALID_CORNERS"
 ERR_TILE_FETCH = "TILE_FETCH_FAILED"
@@ -34,7 +22,6 @@ class Corner(BaseModel):
 class SatelliteRequest(BaseModel):
     device_id: str = Field(..., min_length=1, max_length=64)
     seq: int = Field(..., ge=0, le=2**32 - 1)
-    corners: List[Corner] = Field(..., min_items=4, max_items=4)
-    zoom: Optional[int] = Field(None, ge=2, le=19)
-    palette: str = Field("adaptive", pattern="^(adaptive|gray4)$")
-    format: str = Field("bin", pattern="^(bin|png)$")
+    corners: list[Corner] = Field(..., min_length=4, max_length=4)
+    max_size: int = Field(240, ge=16, le=1024)
+    format: str = Field("rgb565", pattern="^(rgb565|png|jpeg)$")

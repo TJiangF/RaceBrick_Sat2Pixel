@@ -1,6 +1,6 @@
 // RaceBrick_Sat2Pixel - ESP32 uploader example
 // Connects to WiFi, POSTs a 4-corner GNSS bounding box, retries on failure,
-// and receives a 4-color (2-bit) satellite image in .bin format.
+// and receives a <=240x240 satellite image (RGB565 by default).
 //
 // Dependencies (Arduino Library Manager):
 //   - WiFi (built-in)
@@ -15,7 +15,7 @@ const char* WIFI_SSID = "YOUR_SSID";
 const char* WIFI_PASS = "YOUR_PASS";
 
 // Service endpoint (replace with your server address)
-const char* SERVER_URL = "http://47.100.182.210:8000/api/v1/satellite";
+const char* SERVER_URL = "http://47.100.182.210:2020/api/v1/satellite";
 
 // Retransmission policy (must match server README)
 const int TIMEOUT_MS = 5000;
@@ -34,13 +34,12 @@ const float CORNERS[4][2] = {
   {121.4325f, 31.2000f},
 };
 
+// Output image (RGB565, big-endian bytes: [hi, lo] per pixel)
 uint8_t* imgBuf = nullptr;
 size_t imgLen = 0;
 uint16_t imgW = 0, imgH = 0;
-uint32_t palette[4] = {0};
 
 bool uploadOnce(uint32_t s) {
-  // Build request JSON
   StaticJsonDocument<512> doc;
   doc["device_id"] = DEVICE_ID;
   doc["seq"] = s;
@@ -50,9 +49,8 @@ bool uploadOnce(uint32_t s) {
     c["lng"] = CORNERS[i][0];
     c["lat"] = CORNERS[i][1];
   }
-  doc["zoom"] = nullptr;   // auto
-  doc["palette"] = "adaptive";
-  doc["format"] = "bin";
+  doc["max_size"] = 240;
+  doc["format"] = "rgb565";   // or "png" / "jpeg"
 
   String body;
   serializeJson(doc, body);
@@ -68,16 +66,10 @@ bool uploadOnce(uint32_t s) {
     return false;
   }
 
-  // Parse response headers
   imgW = http.header("X-Sat2Pixel-Width").toInt();
   imgH = http.header("X-Sat2Pixel-Height").toInt();
-  String palStr = http.header("X-Sat2Pixel-Palette");  // "#RRGGBB,..."
-  for (int i = 0; i < 4; i++) {
-    palette[i] = (uint32_t)strtol(palStr.substring(i * 7 + 1, i * 7 + 7).c_str(),
-                                  nullptr, 16);
-  }
-
   imgLen = http.getSize();
+
   if (imgBuf) free(imgBuf);
   imgBuf = (uint8_t*)malloc(imgLen);
   WiFiClient* stream = http.getStreamPtr();
@@ -100,11 +92,17 @@ void fetchSatellite() {
   Serial.printf("[%u] giving up\n", s);
 }
 
-// Decode the 2bpp .bin payload (header 16 bytes, then 2 bits/pixel)
-uint8_t pixelAt(const uint8_t* buf, uint16_t x, uint16_t y) {
-  uint16_t rowBytes = (imgW + 3) / 4;
-  const uint8_t* row = buf + 16 + (size_t)y * rowBytes;
-  return (row[x / 4] >> (6 - (x % 4) * 2)) & 0x03;
+// Decode a pixel from the RGB565 buffer (big-endian bytes: [hi, lo] per pixel)
+uint16_t pixelAt(uint16_t x, uint16_t y) {
+  size_t i = ((size_t)y * imgW + x) * 2;
+  return ((uint16_t)imgBuf[i] << 8) | imgBuf[i + 1];
+}
+
+// Example: unpack RGB565 -> RGB888 (for SPI displays that want RGB888)
+void rgb565To888(uint16_t c, uint8_t& r, uint8_t& g, uint8_t& b) {
+  r = (c >> 11) & 0x1F; r = (r << 3) | (r >> 2);
+  g = (c >> 5) & 0x3F;  g = (g << 2) | (g >> 4);
+  b = c & 0x1F;         b = (b << 3) | (b >> 2);
 }
 
 void setup() {

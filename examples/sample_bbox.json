@@ -7,7 +7,6 @@
     {"lng": 121.4350, "lat": 31.2000},
     {"lng": 121.4325, "lat": 31.2000}
   ],
-  "zoom": null,
-  "palette": "adaptive",
-  "format": "bin"
+  "max_size": 240,
+  "format": "rgb565"
 }

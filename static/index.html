@@ -316,6 +316,8 @@
 
   // pan / zoom
   let dragging = false, lastX = 0, lastY = 0;
+  const WHEEL_STEP = 120;   // px of scroll per zoom level (higher = less sensitive)
+  let wheelAcc = 0;
   wrap.addEventListener('pointerdown', (e) => {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
     wrap.classList.add('dragging'); wrap.setPointerCapture(e.pointerId);
@@ -331,11 +333,17 @@
   wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); schedulePreview(); });
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const next = Math.max(2, Math.min(18, state.zoom + (e.deltaY < 0 ? 1 : -1)));
-    if (next === state.zoom) return;
-    state.zoom = next;
-    draw();
-    schedulePreview();
+    wheelAcc += e.deltaY;
+    let changed = false;
+    while (Math.abs(wheelAcc) >= WHEEL_STEP) {
+      const dir = wheelAcc > 0 ? -1 : 1;   // scroll down -> zoom out
+      wheelAcc -= dir * WHEEL_STEP;
+      const next = Math.max(2, Math.min(18, state.zoom + dir));
+      if (next === state.zoom) { wheelAcc = 0; break; }
+      state.zoom = next;
+      changed = true;
+    }
+    if (changed) { draw(); schedulePreview(); }
   }, { passive: false });
 
   document.getElementById('showOverlay').addEventListener('change', (e) => {
