@@ -22,7 +22,8 @@ from sat2pixel.coords import wgs84_to_gcj02
 from sat2pixel.http import urlopen
 from sat2pixel.mosaic import fetch_satellite
 from sat2pixel.nav import build_nav_image
-from sat2pixel.navpacket import encode_nav_packet
+from sat2pixel import pixelstyle
+from sat2pixel.navpacket import encode_indexed_packet, encode_nav_packet, rgb_to_565
 from sat2pixel.preview import downsample, encode, stats
 from sat2pixel.protocol import Corner, NavRequest, SatelliteRequest, DEDUP_TTL_S
 
@@ -116,6 +117,7 @@ class PreviewRequest(BaseModel):
     quality: int = Field(85, ge=1, le=100)
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
     layer: str = Field("satellite", pattern="^(satellite|road)$")
+    style: str = Field("pixel", pattern="^(pixel|original)$")
 
 
 @app.get("/healthz")
@@ -203,6 +205,8 @@ async def preview(req: PreviewRequest):
         )
 
     small = downsample(image, req.max_size, req.method, req.sharpen)
+    if req.style == "pixel":
+        small, _ = pixelstyle.render(small)
     st = stats(small, req.quality)
     body, media_type = encode(small, req.format, req.quality)
 
@@ -298,7 +302,33 @@ async def nav(request: Request):
             status_code=502,
         )
 
-    if req.format == "pal16":
+    if req.style == "pixel":
+        pix, labels = pixelstyle.render(image)
+        w, h = pix.width, pix.height
+        if req.format == "pal16":
+            body_bytes = encode_indexed_packet(labels, pixelstyle.PALETTE_RGB)
+            media_type = "application/octet-stream"
+            headers = {
+                "X-Nav-Seq": str(req.seq),
+                "X-Nav-Width": str(w),
+                "X-Nav-Height": str(h),
+                "X-Nav-Zoom": str(zoom),
+                "X-Nav-Palette": ",".join("#{:04X}".format(rgb_to_565(c)) for c in pixelstyle.PALETTE_RGB),
+                "X-Nav-Size": str(len(body_bytes)),
+                "X-Nav-Raw-Rgb565": str(w * h * 2),
+                "X-Nav-Style": "pixel",
+            }
+        else:
+            body_bytes, media_type = encode(pix, req.format)
+            headers = {
+                "X-Nav-Seq": str(req.seq),
+                "X-Nav-Width": str(w),
+                "X-Nav-Height": str(h),
+                "X-Nav-Zoom": str(zoom),
+                "X-Nav-Size": str(len(body_bytes)),
+                "X-Nav-Style": "pixel",
+            }
+    elif req.format == "pal16":
         body_bytes, palette, w, h = encode_nav_packet(image)
         media_type = "application/octet-stream"
         headers = {
@@ -309,6 +339,7 @@ async def nav(request: Request):
             "X-Nav-Palette": ",".join("#{:04X}".format(int(p)) for p in palette),
             "X-Nav-Size": str(len(body_bytes)),
             "X-Nav-Raw-Rgb565": str(w * h * 2),
+            "X-Nav-Style": "original",
         }
     else:
         body_bytes, media_type = encode(image, req.format)
@@ -318,6 +349,7 @@ async def nav(request: Request):
             "X-Nav-Height": str(image.height),
             "X-Nav-Zoom": str(zoom),
             "X-Nav-Size": str(len(body_bytes)),
+            "X-Nav-Style": "original",
         }
 
     _cache_put(key, body_bytes, media_type, headers)

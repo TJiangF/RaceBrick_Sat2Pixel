@@ -113,6 +113,22 @@ def encode_nav_packet(image):
     return bytes(out), palette, w, h
 
 
+def rgb_to_565(c):
+    r, g, b = c
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+
+
+def encode_indexed_packet(indices, palette_rgb):
+    """Encode an already-classified index map with a given RGB palette (pixel style)."""
+    h, w = indices.shape
+    out = bytearray()
+    out += struct.pack("<HHH", w, h, len(palette_rgb))
+    for c in palette_rgb:
+        out += struct.pack("<H", rgb_to_565(c))
+    out += rle_encode(indices)
+    return bytes(out)
+
+
 def palette565_to_rgb(p):
     r = (int(p) >> 11) & 31
     g = (int(p) >> 5) & 63
