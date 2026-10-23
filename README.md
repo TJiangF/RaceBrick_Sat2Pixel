@@ -1,41 +1,63 @@
 # RaceBrick_Sat2Pixel
 
-GNSS 设备（ESP32）上传四个边界点坐标 → 服务端拉取高德（AMap）卫星影像 → 高效压缩到 ≤240×240 并尽可能保留细节后回传。
+GNSS 设备（ESP32-S3）通过 WiFi 上传坐标 → 服务端拉取高德（AMap）卫星影像 → 压缩成 240×240 后回传。支持两种使用场景：
+
+| 场景 | 输入 | 输出 | 接口 |
+|------|------|------|------|
+| **1. 轨迹四角** | 一段轨迹算出的最外侧四点（bbox） | 覆盖该区域的 240×240 卫星图（RGB565） | `POST /api/v1/satellite` |
+| **2. 实时导航** | 当前坐标（+ 朝向），固定地面范围 | 240×240 **16 色 + RLE 压缩**导航图 | `POST /api/v1/nav` |
 
 ```
-ESP32 ──(WiFi, HTTP POST)──> FastAPI 服务 ──(瓦片拼接)──> 高德卫星图
-                                  │
-                                  ├──(Lanczos 缩放到 ≤240×240)──> 调试台 /api/preview
-                                  └──(RGB565 / JPEG / PNG)──────> 回传设备
+ESP32-S3 ──(WiFi, HTTP POST JSON)──> FastAPI ──> 高德瓦片 ──> 缩放/裁剪到 240×240
+                                        │
+  场景1: 4 角 bbox ────────────────────┼──> RGB565 原始帧 (≈115 KB)
+  场景2: 中心点+朝向 ───────────────────┴──> 16 色 + RLE 压缩包 (≈30 KB)
 ```
+
+**坐标系**：GNSS 输出 WGS-84，高德使用 GCJ-02，服务端自动转换（请求里 `coord:"wgs84"`）。
 
 ## 目录结构
 
 ```
 RaceBrick_Sat2Pixel/
-├── server.py               # FastAPI HTTP 服务入口（协议 + 预览台）
+├── server.py               # FastAPI 入口（场景1/2 + 预览台）
 ├── sat2pixel/
-│   ├── mosaic.py           # 高德卫星瓦片拉取 + 拼接 + 裁剪（自动 zoom / 空白降级）
-│   ├── preview.py          # 高质量缩放（Lanczos/锐化）+ RGB565/JPEG/PNG 编码
-│   ├── protocol.py         # 协议定义（请求模型 / 错误码 / 重传策略）
+│   ├── mosaic.py           # 高德卫星瓦片拉取 + 拼接 + 裁剪
+│   ├── preview.py          # Lanczos 缩放 + RGB565/JPEG/PNG 编码
+│   ├── coords.py           # WGS-84 <-> GCJ-02 坐标转换
+│   ├── nav.py              # 导航视角几何（中心点/范围/朝向 -> 图像）
+│   ├── navpacket.py        # 16 色中位切分 + RLE（导航图压缩）
+│   ├── protocol.py         # 请求模型 / 错误码 / 重传策略
 │   └── http.py             # 带 CA 兜底的 TLS 请求
-├── static/
-│   └── index.html          # 预览台（可拖动地图 + 压缩参数 + 240×240 预览）
+├── static/index.html       # 预览台（拖动地图 + 240×240 预览）
 ├── examples/
-│   ├── sample_bbox.json            # 示例请求（学校大小区域）
-│   └── esp32_upload/esp32_upload.ino  # ESP32 上传 + 重传示例
+│   ├── sample_bbox.json
+│   └── esp32_upload/esp32_upload.ino   # 两种场景 + 重传 + 包解码示例
 └── requirements.txt
 ```
 
-## 交互协议
+## 坐标系（`coord`）
 
-### 请求（ESP32 → 服务）
+所有接口都接受 `coord` 字段：
 
-`POST /api/v1/satellite`，`Content-Type: application/json`：
+| 值 | 含义 |
+|----|------|
+| `gcj02`（默认） | 输入已是高德坐标（网页/高德取点用这个） |
+| `wgs84` | 输入是原始 GNSS/GPS 坐标，服务端先转 GCJ-02 再用 |
+
+转换实现见 `sat2pixel/coords.py`（`wgs84_to_gcj02` / `gcj02_to_wgs84`）。
+
+---
+
+## 场景 1：轨迹四角 → 卫星图
+
+设备把一段轨迹的**最外侧四点**（外接 bbox）发来，服务端回传该区域的图。
+
+`POST /api/v1/satellite`：
 
 ```json
 {
-  "device_id": "esp32-0001",
+  "device_id": "esp32s3-0001",
   "seq": 1042,
   "corners": [
     {"lng": 121.4325, "lat": 31.1975},
@@ -44,121 +66,138 @@ RaceBrick_Sat2Pixel/
     {"lng": 121.4325, "lat": 31.2000}
   ],
   "max_size": 240,
-  "format": "rgb565"
+  "format": "rgb565",
+  "coord": "wgs84"
 }
 ```
 
-| 字段        | 类型     | 必填 | 说明                                                       |
-|-------------|----------|------|------------------------------------------------------------|
-| `device_id` | string   | 是   | 设备唯一标识，1–64 字符                                     |
-| `seq`       | uint32   | 是   | 每设备单调递增，作为幂等键（用于重传去重）                    |
-| `corners`   | array[4] | 是   | 四个最边缘点坐标，顺序固定为 **SW, SE, NE, NW**（西南、东南、东北、西北） |
-| `max_size`  | int      | 否   | 输出最长边（≤1024），默认 240                                |
-| `format`    | string   | 否   | 回传格式：`rgb565`（默认，MCU 直显）/ `png` / `jpeg`         |
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `device_id` | string | 是 | 设备唯一标识（幂等键之一） |
+| `seq` | uint32 | 是 | 单调递增（幂等键之一，重传去重） |
+| `corners` | array[4] | 是 | 四点坐标（SW/SE/NE/NW，任意顺序均可，取 min/max） |
+| `max_size` | int | 否 | 输出边长，默认 240 |
+| `format` | string | 否 | `rgb565`（默认）/ `png` / `jpeg` |
+| `coord` | string | 否 | `gcj02`（默认）/ `wgs84` |
 
-### 响应（服务 → ESP32）
+> 为适配方形屏幕，服务端会把 bbox **外接成以中心为原点的正方形**（边长取宽/高中的较大者），保证四点一定在画面内，再缩放为 240×240。
 
-成功返回 `HTTP 200`，响应体为压缩后的图像数据；关键信息放在响应头，避免 ESP32 解析 JSON：
+**响应**：`HTTP 200`，body 为图像数据，关键信息在响应头：
 
-| 响应头                | 说明                                  |
-|-----------------------|---------------------------------------|
-| `X-Sat2Pixel-Seq`     | 回显 `seq`                             |
-| `X-Sat2Pixel-Width`   | 图像宽（像素）                          |
-| `X-Sat2Pixel-Height`  | 图像高（像素）                          |
-| `X-Sat2Pixel-Size`    | 图像字节数                              |
+| 响应头 | 说明 |
+|--------|------|
+| `X-Sat2Pixel-Seq` | 回显 seq |
+| `X-Sat2Pixel-Width` / `Height` | 图像尺寸 |
+| `X-Sat2Pixel-Size` | 字节数 |
 
-失败返回非 200，响应体为 JSON：
+`rgb565` 格式：每像素 2 字节**大端**，`R5 G6 B5`：`[RRRRRGGG][GGGBBBBB]`。
+
+---
+
+## 场景 2：实时导航 → 压缩图
+
+设备只发**当前坐标**（可选朝向），服务端截取以该点为中心、固定地面范围的正方形，压缩后回传。适合高频刷新（导航每几百毫秒一帧），因此采用 16 色 + RLE 压缩。
+
+`POST /api/v1/nav`：
 
 ```json
-{"code": "TILE_FETCH_FAILED", "message": "..."}
+{
+  "device_id": "esp32s3-0001",
+  "seq": 2050,
+  "lng": 121.43375,
+  "lat": 31.19875,
+  "size_m": 300,
+  "heading": 45,
+  "size": 240,
+  "format": "pal16",
+  "coord": "wgs84"
+}
 ```
 
-错误码：`INVALID_JSON` / `INVALID_CORNERS`（422，附带字段校验信息）/ `TILE_FETCH_FAILED` / `INTERNAL`。
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `device_id` / `seq` | | 是 | 同上（幂等重传） |
+| `lng` / `lat` | float | 是 | 当前坐标 |
+| `size_m` | float | 否 | 以该点为中心的地面边长（米），默认 300 |
+| `heading` | float | 否 | 朝向（度，正北顺时针）；`0`=正北朝上，其它值旋转成「朝向朝上」 |
+| `size` | int | 否 | 输出像素边长，默认 240 |
+| `format` | string | 否 | `pal16`（默认，压缩）/ `rgb565` / `png` / `jpeg` |
+| `coord` | string | 否 | `gcj02`（默认）/ `wgs84` |
 
-### `rgb565` 二进制格式
+**响应头**（`pal16`）：`X-Nav-Width/Height/Zoom/Size`、`X-Nav-Palette`（16 个 RGB565 十六进制）、`X-Nav-Raw-Rgb565`（未压缩大小，便于算压缩率）。
 
-每像素 2 字节（大端），`R5 G6 B5`：`[RRRRRGGG][GGGBBBBB]`。总字节数 = `width × height × 2`。
+### 导航图压缩算法（参考 zyn950929/MotoNav）
 
-### 失败重传机制
+完全对齐参考项目的 **`OriginalMapColors.java`（加权中位切分）** + **`MapGeo.encodeRaster`（RLE）**：
 
-- **超时**：单次请求等待 `TIMEOUT = 5s`。
-- **重传**：超时/网络错误时，用**相同的 `seq`** 重发，最多 `MAX_RETRIES = 3` 次（共 4 次）。
-- **退避**：`1s / 2s / 4s` 指数退避。
-- **幂等去重**：服务端以 `(device_id, seq)` 为键缓存结果，TTL 10 分钟。若上次已处理但响应丢失，重传直接命中缓存返回同一结果，不会重复拉取瓦片、也不会重复扣资源。
+1. **量化直方图**：每像素 RGB 量化到 5-5-5（15 bit），统计 32768 色直方图。
+2. **加权中位切分**：初始 1 个色盒；反复挑「得分 = 色域跨度 × √(像素数)」最大的盒子，沿其跨度最大的通道排序，在**加权中位数**处切成两半；直到 16 个盒子。
+3. **调色板**：每个盒子取加权平均色，打包为 16 个 **RGB565**。
+4. **索引**：每个像素映射到所属盒子编号（0–15）。
+5. **RLE**：按行游程编码，`1 字节 = (run-1)<<4 | 色号`；`run-1 == 15` 时后跟一字节表示 `run-16`（最长 271）。
+
+优点：只用 16 色即可保留导航底图主要结构，RLE 进一步压缩；设备端**无需任何图像解码库**，展开调色板即可上屏。
+
+**压缩包 `pal16` 二进制格式（小端）**：
+
+| 偏移 | 大小 | 字段 |
+|------|------|------|
+| 0 | 2 | width（uint16 LE） |
+| 2 | 2 | height（uint16 LE） |
+| 4 | 2 | palette count = 16（uint16 LE） |
+| 6 | 32 | 16 × RGB565（uint16 LE） |
+| 38 | N | RLE 数据 |
+
+**实测**（240×240，`size_m=300`，卫星底图）：`pal16` ≈ **30–35 KB**，`rgb565` = 115 KB，约 **3.3–3.8× 压缩**；卫星纹理越复杂压缩率越低，普通矢量底图会更高。
+
+---
+
+## 失败重传机制（两个接口通用）
+
+- **超时**：单次等待 `5s`（建议设备端设 12s，首次拉瓦片较慢）。
+- **重传**：超时/网络错误时用**相同 `seq`** 重发，最多 3 次（共 4 次），退避 `1s/2s/4s`。
+- **幂等去重**：服务端以 `(device_id, seq)` 缓存结果 10 分钟，重传直接命中缓存，不重复拉瓦片。
+
+错误返回 JSON：`{"code":"TILE_FETCH_FAILED","message":"..."}`，错误码 `INVALID_JSON` / `INVALID_CORNERS`(422) / `TILE_FETCH_FAILED`。
 
 ## 预览台（交互式网页）
 
-启动后访问 `http://<服务器>:2020/`，可直接：
+访问 `http://<服务器>:2020/`：输入地址搜索定位、拖动地图、`+/-` 按钮缩放（连续缩放，瓦片不足时自动放大）；白色方框内即输出区域，侧栏实时预览 240×240 并显示 PNG/JPEG/RGB565 体积。
 
-- 输入**地址**搜索定位，**拖动地图 / 滚轮缩放**；
-- 实时把当前视野的卫星图**压缩到 ≤240×240**，叠加显示 + 侧栏像素级预览；
-- 调整压缩参数（目标尺寸 / 缩放算法 / 锐化 / 格式 / JPEG 质量），页面实时重算；
-- 侧栏对比 **PNG / JPEG / RGB565** 三种编码的体积，可一键下载。
+## 效果示例（学校区域 ~250 m）
 
-### 压缩方法（保留细节）
-
-1. 瓦片拼接出高分辨率卫星图（比目标尺寸大 2 倍左右，供抗锯齿）；
-2. **Lanczos 缩放**到 ≤240×240（保持宽高比，默认最清晰），可选 Box/Bilinear/Nearest；
-3. 可选**轻锐化**（unsharp mask）恢复边缘对比度；
-4. 编码：
-   - `PNG`：无损，约 100 KB；
-   - `JPEG`：体积最小，240×240 约 15–20 KB（质量可调）；
-   - `RGB565`：每像素 2 字节，MCU 屏幕直接写帧缓冲，无需解码（240×240 = 115 KB）。
-
-### 预览相关接口
-
-| 接口                        | 说明                                        |
-|-----------------------------|---------------------------------------------|
-| `GET  /api/geocode?address=` | 地址 → 经纬度（需配置 `AMAP_WEB_KEY`）       |
-| `POST /api/preview`          | 输入 `{corners, zoom, max_size, method, sharpen, format, quality}`，返回压缩图；响应头带 `X-Preview-Width/Height/Png/Jpeg/Rgb565` |
-
-## 效果示例（学校大小区域，约 250 m × 250 m）
-
-坐标：上海交通大学徐汇校区附近 `(121.4325, 31.1975)–(121.4350, 31.2000)`。
-
-| 项目                 | 值                                            |
-|----------------------|-----------------------------------------------|
-| 瓦片 zoom            | 18（12 张瓦片拼接）                             |
-| 原始卫星图           | 466 × 544，RGB PNG 386 KB                      |
-| 压缩输出             | 206 × 240（Lanczos，最长边 ≤240）               |
-| PNG（无损）          | 105 KB                                        |
-| JPEG（质量 85）      | 17.5 KB                                       |
-| RGB565（MCU 直显）   | 98.9 KB（206×240×2 字节）                       |
+| 项目 | 值 |
+|------|-----|
+| 瓦片 zoom | 18 |
+| 场景1 输出 | 240×240 RGB565（115,200 B） |
+| 场景2 输出 | 240×240 `pal16`（≈30–35 KB，16 色 + RLE） |
+| JPEG（预览对比） | ≈19 KB |
 
 ## 部署
 
-服务端（阿里云轻量应用服务器）单向拉取仓库后运行：
-
 ```bash
-# 使用 deploy key 拉取（只读）
 git clone git@github.com:TJiangF/RaceBrick_Sat2Pixel.git
 cd RaceBrick_Sat2Pixel
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-
-# 地址搜索需要高德 Web 服务 Key
 export AMAP_WEB_KEY=your_amap_web_key
-
-# 调试台（网页）监听 2020
 uvicorn server:app --host 0.0.0.0 --port 2020
 ```
 
-> 注意：需要放行防火墙 2020 端口（`ufw allow 2020/tcp`）；ESP32 生产上传仍走 `/api/v1/satellite`，可与调试台同进程共用。
+> 放行防火墙 2020；两个设备接口与预览台同进程共用。
 
 ## 本地验证
 
 ```bash
-# 生产协议（RGB565，默认）
-curl -X POST http://127.0.0.1:2020/api/v1/satellite \
-  -H 'Content-Type: application/json' \
-  -d @examples/sample_bbox.json \
-  -o out.rgb565 -D -
+# 场景1：轨迹四角（WGS-84）
+curl -X POST http://127.0.0.1:2020/api/v1/satellite -H 'Content-Type: application/json' \
+  -d '{"device_id":"d","seq":1,"corners":[{"lng":121.4325,"lat":31.1975},{"lng":121.4350,"lat":31.1975},{"lng":121.4350,"lat":31.2000},{"lng":121.4325,"lat":31.2000}],"format":"rgb565","coord":"wgs84"}' \
+  -o s1.rgb565 -D -
 
-# 预览接口
-curl -X POST http://127.0.0.1:2020/api/preview \
-  -H 'Content-Type: application/json' \
-  -d '{"corners":[{"lng":121.4325,"lat":31.1975},{"lng":121.4350,"lat":31.1975},{"lng":121.4350,"lat":31.2000},{"lng":121.4325,"lat":31.2000}],"zoom":18,"max_size":240}' \
-  -o preview.png -D -
+# 场景2：实时导航（16 色 RLE）
+curl -X POST http://127.0.0.1:2020/api/v1/nav -H 'Content-Type: application/json' \
+  -d '{"device_id":"d","seq":2,"lng":121.43375,"lat":31.19875,"size_m":300,"heading":45,"format":"pal16","coord":"wgs84"}' \
+  -o nav.pal16 -D -
 ```
 
 ## 许可
