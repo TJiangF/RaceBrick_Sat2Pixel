@@ -1,7 +1,8 @@
-"""Fetch AMap (Gaode) satellite tiles and stitch them into a single image."""
+"""Fetch map tiles (AMap satellite / Tianditu road+satellite) and stitch them."""
 
 import io
 import math
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PIL import Image
@@ -9,21 +10,52 @@ from PIL import Image
 from sat2pixel.http import urlopen
 
 TILE_SIZE = 256
-MAX_ZOOM = 18  # AMap satellite imagery tops out at z18 in most regions
+MAX_ZOOM = 18
 MIN_ZOOM = 2
 
-# layer -> (hosts, query string)
+TIANDITU_KEY = os.environ.get("TIANDITU_KEY", "")
+
+# layer -> source config. datum: AMap = GCJ-02, Tianditu = WGS-84.
 LAYERS = {
-    "satellite": {
+    "satellite": {  # AMap satellite
+        "type": "amap",
         "hosts": [f"webst0{i}.is.autonavi.com" for i in range(1, 5)],
         "query": "style=6",
+        "datum": "gcj02",
     },
-    "road": {
+    "road": {  # Tianditu vector base map (no labels) — like MotoNav
+        "type": "tdt",
+        "tdt_layer": "vec_w",
+        "datum": "wgs84",
+    },
+    "amap_road": {  # AMap road map (with labels)
+        "type": "amap",
         "hosts": [f"webrd0{i}.is.autonavi.com" for i in range(1, 5)],
         "query": "lang=zh_cn&size=1&scale=1&style=8",
+        "datum": "gcj02",
+    },
+    "tdt_satellite": {  # Tianditu satellite imagery
+        "type": "tdt",
+        "tdt_layer": "img_w",
+        "datum": "wgs84",
     },
 }
 DEFAULT_LAYER = "satellite"
+
+
+def layer_datum(layer):
+    return LAYERS.get(layer, LAYERS[DEFAULT_LAYER]).get("datum", "gcj02")
+
+
+def tile_url(x, y, zoom, layer):
+    cfg = LAYERS.get(layer, LAYERS[DEFAULT_LAYER])
+    if cfg["type"] == "tdt":
+        if not TIANDITU_KEY:
+            raise RuntimeError("TIANDITU_KEY is not configured")
+        host = f"t{(x + y) % 8}.tianditu.gov.cn"
+        return f"https://{host}/DataServer?T={cfg['tdt_layer']}&x={x}&y={y}&l={zoom}&tk={TIANDITU_KEY}"
+    host = cfg["hosts"][(x + y) % 4]
+    return f"https://{host}/appmaptile?{cfg['query']}&x={x}&y={y}&z={zoom}"
 
 
 def tile_x(lng: float, zoom: int) -> float:
@@ -62,22 +94,23 @@ def _candidate_zooms(pts, max_tiles=48, max_dim=8):
     return zooms
 
 
-def _tile_url(x, y, zoom, layer):
-    cfg = LAYERS.get(layer, LAYERS[DEFAULT_LAYER])
-    host = cfg["hosts"][(x + y) % 4]
-    return f"https://{host}/appmaptile?{cfg['query']}&x={x}&y={y}&z={zoom}"
-
-
 def _fetch_one(tile, layer):
     x, y, zoom = tile
-    url = _tile_url(x, y, zoom, layer)
+    url = tile_url(x, y, zoom, layer)
     last = None
     for _ in range(3):
         try:
             with urlopen(url, timeout=15) as resp:
                 return x, y, resp.read()
         except Exception as exc:  # noqa: BLE001
-            last = exc
+            detail = str(exc)
+            rd = getattr(exc, "read", None)
+            if rd:
+                try:
+                    detail = rd()[:200].decode("utf-8", "ignore")
+                except Exception:  # noqa: BLE001
+                    pass
+            last = detail
     raise RuntimeError(f"tile fetch failed {url}: {last}")
 
 

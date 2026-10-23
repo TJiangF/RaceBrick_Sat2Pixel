@@ -90,8 +90,10 @@
       <h2>图像类型</h2>
       <div class="row"><label>底图</label>
         <select id="layer">
-          <option value="satellite" selected>卫星图</option>
-          <option value="road">路网图</option>
+          <option value="satellite" selected>卫星图（高德）</option>
+          <option value="road">路网图（天地图）</option>
+          <option value="amap_road">路网图（高德）</option>
+          <option value="tdt_satellite">卫星图（天地图）</option>
         </select>
       </div>
       <div class="row"><label>风格</label>
@@ -223,10 +225,7 @@
 
   // ---- tiles ----
   function tileUrl(z, x, y) {
-    const s = (((x + y) % 4) + 1);
-    if (state.layer === 'road')
-      return 'https://webrd0' + s + '.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=' + x + '&y=' + y + '&z=' + z;
-    return 'https://webst0' + s + '.is.autonavi.com/appmaptile?style=6&x=' + x + '&y=' + y + '&z=' + z;
+    return '/api/tile?layer=' + encodeURIComponent(state.layer) + '&z=' + z + '&x=' + x + '&y=' + y;
   }
   function ensureTile(z, x, y) {
     const key = state.layer + '/' + z + '/' + x + '/' + y;
@@ -339,6 +338,7 @@
   function sizeM() { return +document.getElementById('navSizeM').value; }
   function styleVal() { return document.getElementById('style').value; }
   function themeVal() { return document.getElementById('theme').value; }
+  function datumForLayer() { return (state.layer === 'road' || state.layer === 'tdt_satellite') ? 'wgs84' : 'gcj02'; }
 
   // ---- requests ----
   let reqSeq = 0;
@@ -352,7 +352,7 @@
       sharpen: +document.getElementById('sharpen').value,
       format: fmt === 'rgb565' ? 'png' : fmt,  // preview as png unless jpeg
       quality: +document.getElementById('quality').value,
-      layer: state.layer, style: styleVal(), theme: themeVal(),
+      layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(),
     };
     if (fmt === 'jpeg') body.format = 'jpeg';
     document.getElementById('status').textContent = '处理中…';
@@ -384,7 +384,7 @@
       device_id: 'web-ui', seq: ++navSeq,
       lng: state.lng, lat: state.lat,
       size_m: sizeM(), heading: +document.getElementById('heading').value,
-      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(),
+      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(),
     };
     document.getElementById('status').textContent = '处理中…';
     try {
@@ -493,13 +493,13 @@
       const body = {
         corners: cornersBBox(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))),
         max_size: +document.getElementById('maxSize').value, method: document.getElementById('method').value,
-        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(),
+        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(),
       };
       const r = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'sat2pixel.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     } else {
       const fmt = document.getElementById('navFormat').value;
-      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal() };
+      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer() };
       const r = await fetch('/api/v1/nav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'nav.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     }
@@ -537,7 +537,7 @@
     if (!kw) { hideSuggest(); return; }
     tipDebounce = setTimeout(async () => {
       const my = ++tipSeq;
-      try { const r = await fetch('/api/inputtips?keywords=' + encodeURIComponent(kw)); const d = await r.json(); if (my === tipSeq) renderSuggest(d.tips || []); } catch (err) { hideSuggest(); }
+      try { const r = await fetch('/api/inputtips?keywords=' + encodeURIComponent(kw) + '&datum=' + datumForLayer()); const d = await r.json(); if (my === tipSeq) renderSuggest(d.tips || []); } catch (err) { hideSuggest(); }
     }, 200);
   });
   addressEl.addEventListener('keydown', (e) => {
@@ -552,7 +552,7 @@
     const addr = addressEl.value.trim(); if (!addr) return; hideSuggest();
     document.getElementById('status').textContent = '搜索地址…';
     try {
-      const r = await fetch('/api/geocode?address=' + encodeURIComponent(addr)); const d = await r.json();
+      const r = await fetch('/api/geocode?address=' + encodeURIComponent(addr) + '&datum=' + datumForLayer()); const d = await r.json();
       if (!r.ok) { document.getElementById('status').textContent = d.message || '未找到'; return; }
       state.lng = d.lng; state.lat = d.lat;
       if (state.mode === 'nav') fitNavZoom(); else state.zoom = 19.5;

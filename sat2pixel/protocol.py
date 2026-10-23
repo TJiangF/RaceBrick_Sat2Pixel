@@ -28,7 +28,7 @@ class SatelliteRequest(BaseModel):
     max_size: int = Field(240, ge=16, le=1024)
     format: str = Field("rgb565", pattern="^(rgb565|png|jpeg)$")
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
-    layer: str = Field("satellite", pattern="^(satellite|road)$")
+    layer: str = Field("satellite", pattern="^(satellite|road|amap_road|tdt_satellite)$")
 
 
 class NavRequest(BaseModel):
@@ -43,6 +43,6 @@ class NavRequest(BaseModel):
     size: int = Field(240, ge=16, le=512)         # output pixels (square)
     format: str = Field("pal16", pattern="^(pal16|rgb565|png|jpeg)$")
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
-    layer: str = Field("road", pattern="^(satellite|road)$")
+    layer: str = Field("road", pattern="^(satellite|road|amap_road|tdt_satellite)$")
     style: str = Field("pixel", pattern="^(pixel|original)$")
     theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")

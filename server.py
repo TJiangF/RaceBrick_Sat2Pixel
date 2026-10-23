@@ -18,9 +18,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from sat2pixel.coords import wgs84_to_gcj02
+from sat2pixel.coords import gcj02_to_wgs84, wgs84_to_gcj02
 from sat2pixel.http import urlopen
-from sat2pixel.mosaic import fetch_satellite
+from sat2pixel.mosaic import LAYERS, fetch_satellite, layer_datum, tile_url
 from sat2pixel.nav import build_nav_image
 from sat2pixel import pixelstyle
 from sat2pixel.navpacket import encode_indexed_packet, encode_nav_packet, rgb_to_565
@@ -76,12 +76,21 @@ def _mosaic_get_or_fetch(corners, zoom, layer="satellite"):
     return image, False
 
 
-def _convert_corners(corners, coord):
-    if coord != "wgs84":
-        return corners
+def _convert_lnglat(lng, lat, src, dst):
+    if src == dst:
+        return lng, lat
+    if src == "wgs84" and dst == "gcj02":
+        return wgs84_to_gcj02(lng, lat)
+    if src == "gcj02" and dst == "wgs84":
+        return gcj02_to_wgs84(lng, lat)
+    return lng, lat
+
+
+def _convert_to_layer(corners, src, layer):
+    dst = layer_datum(layer)
     out = []
     for c in corners:
-        lng, lat = wgs84_to_gcj02(c["lng"], c["lat"])
+        lng, lat = _convert_lnglat(c["lng"], c["lat"], src, dst)
         out.append({"lng": lng, "lat": lat})
     return out
 
@@ -116,9 +125,39 @@ class PreviewRequest(BaseModel):
     format: str = Field("png", pattern="^(png|jpeg|rgb565)$")
     quality: int = Field(85, ge=1, le=100)
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
-    layer: str = Field("satellite", pattern="^(satellite|road)$")
+    layer: str = Field("satellite", pattern="^(satellite|road|amap_road|tdt_satellite)$")
     style: str = Field("pixel", pattern="^(pixel|original)$")
     theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")
+
+
+_TILE_CACHE: dict = {}
+
+
+@app.get("/api/tile")
+def tile(layer: str, z: int, x: int, y: int):
+    """Tile proxy so the browser can render the same layer/datum the server uses."""
+    if layer not in LAYERS or z < 1 or z > 19:
+        return Response(status_code=400)
+    key = (layer, z, x, y)
+    item = _TILE_CACHE.get(key)
+    if item and item[0] > time.time():
+        return Response(item[1], media_type="image/png", headers={"Cache-Control": "max-age=3600"})
+    try:
+        with urlopen(tile_url(x, y, z, layer), timeout=15) as resp:
+            data = resp.read()
+    except Exception as exc:  # noqa: BLE001
+        detail = str(exc)
+        rd = getattr(exc, "read", None)
+        if rd:
+            try:
+                detail = rd()[:200].decode("utf-8", "ignore")
+            except Exception:  # noqa: BLE001
+                pass
+        return JSONResponse({"code": "TILE_FAILED", "message": detail}, status_code=502)
+    _TILE_CACHE[key] = (time.time() + 600, data)
+    if len(_TILE_CACHE) > 3000:
+        _TILE_CACHE.clear()
+    return Response(data, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
 
 @app.get("/healthz")
@@ -127,7 +166,7 @@ def healthz():
 
 
 @app.get("/api/inputtips")
-def inputtips(keywords: str):
+def inputtips(keywords: str, datum: str = "gcj02"):
     if not AMAP_WEB_KEY:
         return JSONResponse(
             {"code": "NO_KEY", "message": "AMAP_WEB_KEY is not configured"},
@@ -150,20 +189,23 @@ def inputtips(keywords: str):
         if not isinstance(loc, str) or not loc:
             continue
         lng, _, lat = loc.partition(",")
+        flng, flat = float(lng), float(lat)
+        if datum == "wgs84":
+            flng, flat = gcj02_to_wgs84(flng, flat)
         tips.append(
             {
                 "name": t.get("name"),
                 "district": t.get("district"),
                 "address": t.get("address"),
-                "lng": float(lng),
-                "lat": float(lat),
+                "lng": flng,
+                "lat": flat,
             }
         )
     return {"tips": tips}
 
 
 @app.get("/api/geocode")
-def geocode(address: str):
+def geocode(address: str, datum: str = "gcj02"):
     if not AMAP_WEB_KEY:
         return JSONResponse(
             {"code": "NO_KEY", "message": "AMAP_WEB_KEY is not configured"},
@@ -185,9 +227,12 @@ def geocode(address: str):
             status_code=404,
         )
     lng, lat = geos[0]["location"].split(",")
+    flng, flat = float(lng), float(lat)
+    if datum == "wgs84":
+        flng, flat = gcj02_to_wgs84(flng, flat)
     return {
-        "lng": float(lng),
-        "lat": float(lat),
+        "lng": flng,
+        "lat": flat,
         "formatted": geos[0].get("formatted_address", address),
     }
 
@@ -195,7 +240,7 @@ def geocode(address: str):
 @app.post("/api/preview")
 async def preview(req: PreviewRequest):
     corners = [c.model_dump() for c in req.corners]
-    corners = _convert_corners(corners, req.coord)
+    corners = _convert_to_layer(corners, req.coord, req.layer)
     try:
         image, _ = _mosaic_get_or_fetch(corners, req.zoom, req.layer)
     except Exception as exc:  # noqa: BLE001
@@ -244,7 +289,7 @@ async def satellite(request: Request):
         return Response(content=cbody, media_type=ctype, headers=cheaders)
 
     corners = [c.model_dump() for c in req.corners]
-    corners = _convert_corners(corners, req.coord)
+    corners = _convert_to_layer(corners, req.coord, req.layer)
     corners = _expand_square(corners)
     try:
         image, _ = _mosaic_get_or_fetch(corners, None, req.layer)
@@ -290,9 +335,7 @@ async def nav(request: Request):
         _, cbody, ctype, cheaders = cached
         return Response(content=cbody, media_type=ctype, headers=cheaders)
 
-    lng, lat = req.lng, req.lat
-    if req.coord == "wgs84":
-        lng, lat = wgs84_to_gcj02(lng, lat)
+    lng, lat = _convert_lnglat(req.lng, req.lat, req.coord, layer_datum(req.layer))
 
     try:
         image, zoom = build_nav_image(lng, lat, req.size_m, req.size, req.heading, req.layer)

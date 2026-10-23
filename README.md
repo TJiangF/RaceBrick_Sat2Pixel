@@ -49,12 +49,17 @@ RaceBrick_Sat2Pixel/
 
 ## 图像类型（`layer`）
 
-两种底图可在 API 上切换，所有接口都接受 `layer` 字段：
+底图可在 API 上切换，所有接口都接受 `layer` 字段。不同来源**坐标系不同**，服务端按 `layer` 自动转换（`coord` 是输入坐标系）：
 
-| 值 | 底图 |
-|----|------|
-| `satellite` | 高德卫星图（`webst0x…style=6`），场景 1 默认 |
-| `road` | 高德常规路网图（`webrd0x…style=8`，带路名），场景 2 默认 |
+| 值 | 底图 | 坐标系 | 说明 |
+|----|------|--------|------|
+| `satellite` | 高德卫星图（`webst0x…style=6`） | GCJ-02 | 场景 1 默认 |
+| `road` | **天地图矢量路网**（`vec_w`，无文字标注） | WGS-84 | 场景 2 默认，像素风最干净 |
+| `amap_road` | 高德路网（`webrd0x…style=8`，带路名） | GCJ-02 | 与天地图对照用 |
+| `tdt_satellite` | 天地图卫星图（`img_w`） | WGS-84 | 卫星源可选 |
+
+> 天地图提供卫星图（`img_w`）；本项目卫星默认仍走高德，`tdt_satellite` 可选。
+> 天地图密钥通过环境变量 `TIANDITU_KEY` 配置，且**必须在该 key 的 IP 白名单里加入服务器公网 IP**，否则返回 `301008 IP不匹配`。天地图 `vec_w` 不含文字标注，像素风更干净（文字需另叠 `cva_w`，本项目未用）。
 
 ## 风格（`style`）与主题（`theme`）
 
@@ -232,6 +237,7 @@ cd RaceBrick_Sat2Pixel
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 export AMAP_WEB_KEY=your_amap_web_key
+export TIANDITU_KEY=your_tianditu_key   # 路网图(天地图)需要；key 的 IP 白名单要含本机公网 IP
 uvicorn server:app --host 0.0.0.0 --port 2020
 ```
 
