@@ -16,6 +16,7 @@ import urllib.parse
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
 
 from sat2pixel.coords import gcj02_to_wgs84, wgs84_to_gcj02
@@ -129,6 +130,7 @@ class PreviewRequest(BaseModel):
     style: str = Field("pixel", pattern="^(pixel|original)$")
     theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")
     process: bool = True
+    sat_opacity: int = Field(100, ge=0, le=100)
 
 
 _TILE_CACHE: dict = {}
@@ -247,9 +249,22 @@ def geocode(address: str, datum: str = "gcj02"):
 @app.post("/api/preview")
 async def preview(req: PreviewRequest):
     corners = [c.model_dump() for c in req.corners]
-    corners = _convert_to_layer(corners, req.coord, req.layer)
     try:
-        image, _ = _mosaic_get_or_fetch(corners, req.zoom, req.layer)
+        if req.layer == "satellite":
+            cg = _convert_to_layer(corners, req.coord, "satellite")  # gcj02
+            sat_full, _ = _mosaic_get_or_fetch(cg, req.zoom, "satellite")
+            small = downsample(sat_full, req.max_size, req.method, req.sharpen)
+            if req.sat_opacity < 100:
+                cw = _convert_to_layer(corners, req.coord, "road")   # wgs84
+                road_full, _ = _mosaic_get_or_fetch(cw, req.zoom, "road")
+                road_small = downsample(road_full, req.max_size, req.method, req.sharpen)
+                small = Image.blend(road_small, small, req.sat_opacity / 100.0)
+        else:
+            cl = _convert_to_layer(corners, req.coord, req.layer)
+            full, _ = _mosaic_get_or_fetch(cl, req.zoom, req.layer)
+            small = downsample(full, req.max_size, req.method, req.sharpen)
+            if req.process and req.style == "pixel":
+                small, _ = pixelstyle.render(small, req.theme)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
@@ -257,9 +272,6 @@ async def preview(req: PreviewRequest):
             status_code=502,
         )
 
-    small = downsample(image, req.max_size, req.method, req.sharpen)
-    if req.process and req.style == "pixel":
-        small, _ = pixelstyle.render(small, req.theme)
     st = stats(small, req.quality)
     body, media_type = encode(small, req.format, req.quality)
 
@@ -342,10 +354,17 @@ async def nav(request: Request):
         _, cbody, ctype, cheaders = cached
         return Response(content=cbody, media_type=ctype, headers=cheaders)
 
-    lng, lat = _convert_lnglat(req.lng, req.lat, req.coord, layer_datum(req.layer))
-
     try:
-        image, zoom = build_nav_image(lng, lat, req.size_m, req.size, req.heading, req.layer)
+        if req.layer == "satellite":
+            slng, slat = _convert_lnglat(req.lng, req.lat, req.coord, "gcj02")
+            image, zoom = build_nav_image(slng, slat, req.size_m, req.size, req.heading, "satellite")
+            if req.sat_opacity < 100:
+                rlng, rlat = _convert_lnglat(req.lng, req.lat, req.coord, "wgs84")
+                road_img, _ = build_nav_image(rlng, rlat, req.size_m, req.size, req.heading, "road")
+                image = Image.blend(road_img, image, req.sat_opacity / 100.0)
+        else:
+            lng, lat = _convert_lnglat(req.lng, req.lat, req.coord, layer_datum(req.layer))
+            image, zoom = build_nav_image(lng, lat, req.size_m, req.size, req.heading, req.layer)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
@@ -353,55 +372,42 @@ async def nav(request: Request):
             status_code=502,
         )
 
-    if req.process and req.style == "pixel":
+    is_pixel = req.layer != "satellite" and req.process and req.style == "pixel"
+    if is_pixel:
         pix, labels = pixelstyle.render(image, req.theme)
         pal = pixelstyle.palette(req.theme)
-        w, h = pix.width, pix.height
-        if req.format == "pal16":
+    else:
+        pix, labels, pal = image, None, None
+
+    w, h = pix.width, pix.height
+    style_tag = "pixel" if is_pixel else "original"
+    if req.format == "pal16":
+        if is_pixel:
             body_bytes = encode_indexed_packet(labels, pal)
-            media_type = "application/octet-stream"
-            headers = {
-                "X-Nav-Seq": str(req.seq),
-                "X-Nav-Width": str(w),
-                "X-Nav-Height": str(h),
-                "X-Nav-Zoom": str(zoom),
-                "X-Nav-Palette": ",".join("#{:04X}".format(rgb_to_565(c)) for c in pal),
-                "X-Nav-Size": str(len(body_bytes)),
-                "X-Nav-Raw-Rgb565": str(w * h * 2),
-                "X-Nav-Style": "pixel",
-            }
+            palette_hdr = [rgb_to_565(c) for c in pal]
         else:
-            body_bytes, media_type = encode(pix, req.format)
-            headers = {
-                "X-Nav-Seq": str(req.seq),
-                "X-Nav-Width": str(w),
-                "X-Nav-Height": str(h),
-                "X-Nav-Zoom": str(zoom),
-                "X-Nav-Size": str(len(body_bytes)),
-                "X-Nav-Style": "pixel",
-            }
-    elif req.format == "pal16":
-        body_bytes, palette, w, h = encode_nav_packet(image)
+            body_bytes, pal565, w, h = encode_nav_packet(pix)
+            palette_hdr = [int(p) for p in pal565]
         media_type = "application/octet-stream"
         headers = {
             "X-Nav-Seq": str(req.seq),
             "X-Nav-Width": str(w),
             "X-Nav-Height": str(h),
             "X-Nav-Zoom": str(zoom),
-            "X-Nav-Palette": ",".join("#{:04X}".format(int(p)) for p in palette),
+            "X-Nav-Palette": ",".join("#{:04X}".format(int(p)) for p in palette_hdr),
             "X-Nav-Size": str(len(body_bytes)),
             "X-Nav-Raw-Rgb565": str(w * h * 2),
-            "X-Nav-Style": "original",
+            "X-Nav-Style": style_tag,
         }
     else:
-        body_bytes, media_type = encode(image, req.format)
+        body_bytes, media_type = encode(pix, req.format)
         headers = {
             "X-Nav-Seq": str(req.seq),
-            "X-Nav-Width": str(image.width),
-            "X-Nav-Height": str(image.height),
+            "X-Nav-Width": str(w),
+            "X-Nav-Height": str(h),
             "X-Nav-Zoom": str(zoom),
             "X-Nav-Size": str(len(body_bytes)),
-            "X-Nav-Style": "original",
+            "X-Nav-Style": style_tag,
         }
 
     _cache_put(key, body_bytes, media_type, headers)

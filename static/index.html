@@ -94,6 +94,10 @@
           <option value="road">路网图（天地图）</option>
         </select>
       </div>
+      <div class="row"><label>卫星透明度</label>
+        <input type="range" id="satOpacity" min="0" max="100" value="100" />
+        <span class="val" id="satOpacityVal">100%</span>
+      </div>
       <div class="row"><label>风格</label>
         <select id="style">
           <option value="pixel" selected>像素风（4色平涂）</option>
@@ -354,7 +358,15 @@
   function styleVal() { return document.getElementById('style').value; }
   function themeVal() { return document.getElementById('theme').value; }
   function datumForLayer() { return (state.layer === 'road' || state.layer === 'tdt_satellite') ? 'wgs84' : 'gcj02'; }
+  function updateControlStates() {
+    const sat = state.layer === 'satellite';
+    document.getElementById('satOpacity').disabled = !sat;
+    const proc = processOn();
+    document.getElementById('style').disabled = sat || !proc;
+    document.getElementById('theme').disabled = sat || !proc;
+  }
   function processOn() { return document.getElementById('process').checked; }
+  function satOpacity() { return +document.getElementById('satOpacity').value; }
 
   // ---- requests ----
   let reqSeq = 0;
@@ -368,7 +380,7 @@
       sharpen: +document.getElementById('sharpen').value,
       format: fmt === 'rgb565' ? 'png' : fmt,  // preview as png unless jpeg
       quality: +document.getElementById('quality').value,
-      layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(),
+      layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(), sat_opacity: satOpacity(),
     };
     if (fmt === 'jpeg') body.format = 'jpeg';
     document.getElementById('status').textContent = '处理中…';
@@ -400,7 +412,7 @@
       device_id: 'web-ui', seq: ++navSeq,
       lng: state.lng, lat: state.lat,
       size_m: sizeM(), heading: +document.getElementById('heading').value,
-      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(),
+      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(), sat_opacity: satOpacity(),
     };
     document.getElementById('status').textContent = '处理中…';
     try {
@@ -487,13 +499,14 @@
         const d = await r.json(); state.lng = d.lng; state.lat = d.lat;
       } catch (_) {}
     }
-    tiles.clear(); draw(); schedule();
+    tiles.clear(); updateControlStates(); draw(); schedule();
   });
   document.getElementById('style').addEventListener('change', schedule);
   document.getElementById('process').addEventListener('change', () => {
     const on = processOn();
     document.getElementById('style').disabled = !on;
     document.getElementById('theme').disabled = !on;
+    updateControlStates();
     schedule();
   });
   document.getElementById('theme').addEventListener('change', schedule);
@@ -510,6 +523,10 @@
   bind('navSizeM', 'navSizeMVal', 'm', () => { if (state.mode === 'nav') fitNavZoom(); draw(); schedule(); });
   bind('heading', 'headingVal', '°');
   bind('navSize', 'navSizeVal');
+  document.getElementById('satOpacity').addEventListener('input', (e) => {
+    document.getElementById('satOpacityVal').textContent = e.target.value + '%';
+    schedule();
+  });
   document.getElementById('method').addEventListener('change', schedule);
   document.getElementById('format').addEventListener('change', schedule);
   document.getElementById('navFormat').addEventListener('change', schedule);
@@ -524,13 +541,13 @@
       const body = {
         corners: cornersBBox(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))),
         max_size: +document.getElementById('maxSize').value, method: document.getElementById('method').value,
-        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(),
+        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(), sat_opacity: satOpacity(),
       };
       const r = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'sat2pixel.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     } else {
       const fmt = document.getElementById('navFormat').value;
-      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn() };
+      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(), sat_opacity: satOpacity() };
       const r = await fetch('/api/v1/nav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'nav.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     }
@@ -592,7 +609,7 @@
   }
 
   window.addEventListener('resize', () => { resize(); draw(); schedule(); });
-  resize(); setMode('bbox');
+  resize(); updateControlStates(); setMode('bbox');
 })();
 </script>
 </body>
