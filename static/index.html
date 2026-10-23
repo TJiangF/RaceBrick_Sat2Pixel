@@ -152,7 +152,7 @@
   const state = {
     lng: 121.43375,
     lat: 31.19875,
-    zoom: 17,
+    zoom: 19.5,
     baseStyle: 6,
     overlay: null,
     showOverlay: true,
@@ -358,9 +358,8 @@
   let dragging = false, lastX = 0, lastY = 0;
 
   function zoomBy(dir) {
-    const next = Math.max(2, Math.min(20, state.zoom + dir));
-    if (next === state.zoom) return;
-    state.zoom = next;
+    const next = Math.max(2, Math.min(20, state.zoom + dir * 0.5));
+    state.zoom = Math.round(next * 10) / 10;
     draw();
     schedulePreview();
   }
@@ -436,7 +435,7 @@
   function selectTip(t) {
     addressEl.value = t.name;
     hideSuggest();
-    state.lng = t.lng; state.lat = t.lat; state.zoom = 17;
+    state.lng = t.lng; state.lat = t.lat; state.zoom = 19.5;
     draw(); schedulePreview();
     document.getElementById('status').textContent = [t.district, t.address].filter(Boolean).join(' · ') || t.name;
   }
@@ -480,7 +479,7 @@
       const resp = await fetch('/api/geocode?address=' + encodeURIComponent(addr));
       const data = await resp.json();
       if (!resp.ok) { document.getElementById('status').textContent = data.message || '未找到'; return; }
-      state.lng = data.lng; state.lat = data.lat; state.zoom = 17;
+      state.lng = data.lng; state.lat = data.lat; state.zoom = 19.5;
       draw(); schedulePreview();
       document.getElementById('status').textContent = data.formatted || addr;
     } catch (e) {
