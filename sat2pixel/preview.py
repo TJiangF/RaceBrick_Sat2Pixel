@@ -21,15 +21,15 @@ METHODS = {
 }
 
 
-def fit_size(w, h, max_size):
-    """Fit inside max_size x max_size, preserving aspect ratio."""
-    scale = min(1.0, max_size / max(w, h))
-    return max(1, int(round(w * scale))), max(1, int(round(h * scale)))
-
-
 def downsample(image, max_size=240, method="lanczos", sharpen=0.0):
-    w, h = fit_size(image.width, image.height, max_size)
-    out = image.convert("RGB").resize((w, h), METHODS.get(method, Image.Resampling.LANCZOS))
+    """Center-crop to a square and resize to max_size x max_size (square output)."""
+    im = image.convert("RGB")
+    w, h = im.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    crop = im.crop((left, top, left + side, top + side))
+    out = crop.resize((max_size, max_size), METHODS.get(method, Image.Resampling.LANCZOS))
     if sharpen > 0:
         out = out.filter(ImageFilter.UnsharpMask(radius=2, percent=int(sharpen * 100), threshold=2))
     return out

@@ -72,7 +72,7 @@
   </div>
   <div id="sidebar">
     <h1>RaceBrick Sat2Pixel</h1>
-    <div class="sub">卫星图 → ≤240×240 高效压缩（拖动地图 / 滚轮缩放）</div>
+    <div class="sub">卫星图 → 240×240 方框压缩（拖动地图 / 按钮缩放，方框内即输出区域）</div>
 
     <div class="block">
       <h2>地址搜索</h2>
@@ -161,6 +161,7 @@
   const tiles = new Map();
   const MAX_TILES = 400;
   let overlayUrl = null, previewUrl = null;
+  let lastStats = null;
 
   function worldX(lng) { return (lng + 180) / 360; }
   function worldY(lat) {
@@ -209,29 +210,52 @@
   function draw() {
     const { w, h, topLeftX, topLeftY } = viewport();
     ctx.clearRect(0, 0, w, h);
-    const z = state.zoom;
-    const x0 = Math.floor(topLeftX / 256), x1 = Math.floor((topLeftX + w) / 256);
-    const y0 = Math.floor(topLeftY / 256), y1 = Math.floor((topLeftY + h) / 256);
+
+    const tz = Math.max(2, Math.min(18, Math.floor(state.zoom)));
+    const ts = 256 * Math.pow(2, state.zoom - tz);   // tile size in view px
+    const x0 = Math.floor(topLeftX / ts), x1 = Math.floor((topLeftX + w) / ts);
+    const y0 = Math.floor(topLeftY / ts), y1 = Math.floor((topLeftY + h) / ts);
     for (let x = x0; x <= x1; x++) {
       for (let y = y0; y <= y1; y++) {
-        const t = ensureTile(z, x, y);
-        if (t.loaded) ctx.drawImage(t.img, x * 256 - topLeftX, y * 256 - topLeftY, 256, 256);
+        const t = ensureTile(tz, x, y);
+        if (t.loaded) ctx.drawImage(t.img, x * ts - topLeftX, y * ts - topLeftY, ts, ts);
       }
     }
+
+    const b = squareBox(w, h);
     if (state.showOverlay && state.overlay) {
       ctx.globalAlpha = state.opacity;
-      ctx.drawImage(state.overlay, 0, 0, w, h);
+      ctx.drawImage(state.overlay, b.left, b.top, b.side, b.side);
       ctx.globalAlpha = 1;
     }
-    hud.textContent = '中心 ' + state.lng.toFixed(5) + ', ' + state.lat.toFixed(5) + ' · zoom ' + state.zoom;
+
+    // dim outside the output square + outline
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, w, b.top);
+    ctx.fillRect(0, b.top, b.left, b.side);
+    ctx.fillRect(b.left + b.side, b.top, w - b.left - b.side, b.side);
+    ctx.fillRect(0, b.top + b.side, w, h - b.top - b.side);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(b.left + 0.5, b.top + 0.5, b.side - 1, b.side - 1);
+
+    let txt = 'zoom ' + state.zoom.toFixed(1);
+    if (lastStats) txt += ' · ' + lastStats.width + '×' + lastStats.height + ' · JPEG ' + lastStats.jpeg;
+    hud.textContent = txt;
+  }
+
+  function squareBox(w, h) {
+    const side = Math.min(w, h);
+    return { left: (w - side) / 2, top: (h - side) / 2, side };
   }
 
   function corners() {
     const { w, h, topLeftX, topLeftY } = viewport();
-    const nwLng = lngFromWorld(topLeftX / scale());
-    const nwLat = latFromWorld(topLeftY / scale());
-    const seLng = lngFromWorld((topLeftX + w) / scale());
-    const seLat = latFromWorld((topLeftY + h) / scale());
+    const b = squareBox(w, h);
+    const nwLng = lngFromWorld((topLeftX + b.left) / scale());
+    const nwLat = latFromWorld((topLeftY + b.top) / scale());
+    const seLng = lngFromWorld((topLeftX + b.left + b.side) / scale());
+    const seLat = latFromWorld((topLeftY + b.top + b.side) / scale());
     return [
       { lng: nwLng, lat: seLat },
       { lng: seLng, lat: seLat },
@@ -257,7 +281,10 @@
   let reqSeq = 0;
   async function requestPreview(format) {
     const mySeq = ++reqSeq;
-    const body = Object.assign({ corners: corners(), zoom: state.zoom }, options());
+    const body = Object.assign(
+      { corners: corners(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))) },
+      options()
+    );
     if (format) body.format = format;
     document.getElementById('status').textContent = '处理中…';
     try {
@@ -274,6 +301,10 @@
       const png = resp.headers.get('X-Preview-Png');
       const jpeg = resp.headers.get('X-Preview-Jpeg');
       const rgb565 = resp.headers.get('X-Preview-Rgb565');
+      lastStats = {
+        width: +w, height: +h,
+        png: fmtBytes(+png), jpeg: fmtBytes(+jpeg), rgb565: fmtBytes(+rgb565),
+      };
 
       if (format) {
         document.getElementById('status').textContent = '已下载 ' + w + '×' + h;
@@ -289,9 +320,9 @@
       previewUrl = url;
       document.getElementById('previewImg').src = url;
       document.getElementById('previewStats').innerHTML =
-        '<b>' + w + '×' + h + '</b> · PNG ' + fmtBytes(+png) +
-        ' · JPEG ' + fmtBytes(+jpeg) + ' · RGB565 ' + fmtBytes(+rgb565);
-      document.getElementById('status').textContent = '完成 · zoom ' + state.zoom;
+        '<b>' + w + '×' + h + '</b> · PNG ' + lastStats.png +
+        ' · JPEG ' + lastStats.jpeg + ' · RGB565 ' + lastStats.rgb565;
+      document.getElementById('status').textContent = '完成 · zoom ' + state.zoom.toFixed(1);
       return blob;
     } catch (e) {
       if (mySeq === reqSeq) document.getElementById('status').textContent = '请求失败';
@@ -327,7 +358,7 @@
   let dragging = false, lastX = 0, lastY = 0;
 
   function zoomBy(dir) {
-    const next = Math.max(2, Math.min(18, state.zoom + dir));
+    const next = Math.max(2, Math.min(20, state.zoom + dir));
     if (next === state.zoom) return;
     state.zoom = next;
     draw();
