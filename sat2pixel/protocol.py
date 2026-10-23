@@ -45,3 +45,4 @@ class NavRequest(BaseModel):
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
     layer: str = Field("road", pattern="^(satellite|road)$")
     style: str = Field("pixel", pattern="^(pixel|original)$")
+    theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")

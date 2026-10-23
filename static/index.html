@@ -100,6 +100,21 @@
           <option value="original">原色（16色/高清）</option>
         </select>
       </div>
+      <div class="row"><label>主题</label>
+        <select id="theme">
+          <option value="gameboy" selected>掌机像素 (GameBoy)</option>
+          <option value="original">原版</option>
+          <option value="vice">罪恶都市</option>
+          <option value="gta">GTA5</option>
+          <option value="cyber">赛博霓虹</option>
+          <option value="paper">复古纸地图</option>
+          <option value="minimal">极简黑白</option>
+          <option value="blueprint">蓝图</option>
+          <option value="radar">雷达</option>
+          <option value="compass">寻宝罗盘</option>
+          <option value="satellite_alt">卫星替代</option>
+        </select>
+      </div>
     </div>
 
     <div class="block">
@@ -323,6 +338,7 @@
 
   function sizeM() { return +document.getElementById('navSizeM').value; }
   function styleVal() { return document.getElementById('style').value; }
+  function themeVal() { return document.getElementById('theme').value; }
 
   // ---- requests ----
   let reqSeq = 0;
@@ -336,7 +352,7 @@
       sharpen: +document.getElementById('sharpen').value,
       format: fmt === 'rgb565' ? 'png' : fmt,  // preview as png unless jpeg
       quality: +document.getElementById('quality').value,
-      layer: state.layer, style: styleVal(),
+      layer: state.layer, style: styleVal(), theme: themeVal(),
     };
     if (fmt === 'jpeg') body.format = 'jpeg';
     document.getElementById('status').textContent = '处理中…';
@@ -368,7 +384,7 @@
       device_id: 'web-ui', seq: ++navSeq,
       lng: state.lng, lat: state.lat,
       size_m: sizeM(), heading: +document.getElementById('heading').value,
-      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(),
+      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(),
     };
     document.getElementById('status').textContent = '处理中…';
     try {
@@ -449,6 +465,7 @@
     state.layer = e.target.value; tiles.clear(); draw(); schedule();
   });
   document.getElementById('style').addEventListener('change', schedule);
+  document.getElementById('theme').addEventListener('change', schedule);
 
   // ---- control bindings ----
   const bind = (id, valId, suffix = '', onChange = schedule) => {
@@ -476,13 +493,13 @@
       const body = {
         corners: cornersBBox(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))),
         max_size: +document.getElementById('maxSize').value, method: document.getElementById('method').value,
-        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(),
+        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(),
       };
       const r = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'sat2pixel.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     } else {
       const fmt = document.getElementById('navFormat').value;
-      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal() };
+      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal() };
       const r = await fetch('/api/v1/nav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'nav.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     }

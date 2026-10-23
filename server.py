@@ -118,6 +118,7 @@ class PreviewRequest(BaseModel):
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
     layer: str = Field("satellite", pattern="^(satellite|road)$")
     style: str = Field("pixel", pattern="^(pixel|original)$")
+    theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")
 
 
 @app.get("/healthz")
@@ -206,7 +207,7 @@ async def preview(req: PreviewRequest):
 
     small = downsample(image, req.max_size, req.method, req.sharpen)
     if req.style == "pixel":
-        small, _ = pixelstyle.render(small)
+        small, _ = pixelstyle.render(small, req.theme)
     st = stats(small, req.quality)
     body, media_type = encode(small, req.format, req.quality)
 
@@ -303,17 +304,18 @@ async def nav(request: Request):
         )
 
     if req.style == "pixel":
-        pix, labels = pixelstyle.render(image)
+        pix, labels = pixelstyle.render(image, req.theme)
+        pal = pixelstyle.palette(req.theme)
         w, h = pix.width, pix.height
         if req.format == "pal16":
-            body_bytes = encode_indexed_packet(labels, pixelstyle.PALETTE_RGB)
+            body_bytes = encode_indexed_packet(labels, pal)
             media_type = "application/octet-stream"
             headers = {
                 "X-Nav-Seq": str(req.seq),
                 "X-Nav-Width": str(w),
                 "X-Nav-Height": str(h),
                 "X-Nav-Zoom": str(zoom),
-                "X-Nav-Palette": ",".join("#{:04X}".format(rgb_to_565(c)) for c in pixelstyle.PALETTE_RGB),
+                "X-Nav-Palette": ",".join("#{:04X}".format(rgb_to_565(c)) for c in pal),
                 "X-Nav-Size": str(len(body_bytes)),
                 "X-Nav-Raw-Rgb565": str(w * h * 2),
                 "X-Nav-Style": "pixel",

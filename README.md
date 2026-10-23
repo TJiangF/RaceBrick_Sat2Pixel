@@ -56,22 +56,34 @@ RaceBrick_Sat2Pixel/
 | `satellite` | 高德卫星图（`webst0x…style=6`），场景 1 默认 |
 | `road` | 高德常规路网图（`webrd0x…style=8`，带路名），场景 2 默认 |
 
-## 风格（`style`）
+## 风格（`style`）与主题（`theme`）
 
-决定图像的渲染风格，所有接口都接受 `style` 字段：
+`style` 决定渲染方式，`theme` 决定像素风的配色（MotoNav 固件 `MapTheme` 表，RGB565）：
 
-| 值 | 说明 |
-|----|------|
-| `pixel`（默认） | **MotoNav 像素风**：4 类语义分类 + 固定平涂色板 |
+| `style` | 说明 |
+|---------|------|
+| `pixel`（默认） | **MotoNav 像素风**：4 类语义分类 + 主题平涂色板 |
 | `original` | 原色：保留高德原始观感（导航用 16 色加权中位切分 / 框选用 Lanczos 高清） |
 
-**像素风算法**（对齐 MotoNav `MapGeo.classifyPixel` / `cleanRaster` / `dilateRoads` + `AmapSdkRaster` 色板）：
+| `theme` | 名称 | 街区 / 道路 / 绿地 / 水面 |
+|---------|------|----------------------------|
+| `gameboy`（默认） | 掌机像素 | `#8CC373` / `#E7FBD6` / `#316952` / `#081821` |
+| `original` | 原版 | `#DEDFDE` / `#313031` / `#5ABE5A` / `#4A92DE` |
+| `vice` | 罪恶都市 | `#E7DBCE` / `#313039` / `#73C36B` / `#4AC7DE` |
+| `gta` | GTA5 | `#394142` / `#9CA2AD` / `#426539` / `#29517B` |
+| `cyber` | 赛博霓虹 | `#000408` / `#0096B5` / `#002018` / `#180839` |
+| `paper` | 复古纸 | `#EFE3C6` / `#F7BA6B` / `#C6D79C` / `#9CC7D6` |
+| `minimal` | 极简黑白 | `#000000` / `#848284` / `#000000` / `#000000` |
+| `blueprint` | 蓝图 | `#08285A` / `#DEEBFF` / `#184984` / `#2965AD` |
+| `radar` / `compass` / `satellite_alt` | 雷达 / 寻宝罗盘 / 卫星替代 | 见 `pixelstyle.py` |
+
+**像素风算法**（对齐 MotoNav `MapGeo.classifyPixel` / `cleanRaster` / `dilateRoads` + 固件 `MapTheme`）：
 
 1. `backgroundLum`：低饱和像素里出现最多的亮度 = 街区底色；
 2. HSV 分类：水体（蓝相 s>0.12）→ 绿地（绿相 s>0.10）→ 道路（黄橙相 s>0.18 或比底色亮 6 以上）→ 其余为街区；
 3. 去噪：删除 <40px（道路 <60px）的孤立碎块（图标/文字残留），再 3×3 多数投票平滑；
 4. 道路加粗 1px（向街区扩张），小屏更清晰；
-5. 固定 4 色平涂：街区 `#DCDCDC`、道路 `#303030`、绿地 `#5BBF5B`、水面 `#4A90D9`。
+5. 用主题色板平涂（GameBoy 主题即 `#8CC373` 底 + 浅绿道路，呈现掌机像素风）。
 
 像素风是大色块，RLE 极其高效（240×240 路网图 **≈1.7 KB**，对比原色 16 色 ≈17 KB、RGB565 115 KB）。
 
@@ -154,6 +166,7 @@ RaceBrick_Sat2Pixel/
 | `coord` | string | 否 | `gcj02`（默认）/ `wgs84` |
 | `layer` | string | 否 | `road`（默认）/ `satellite` |
 | `style` | string | 否 | `pixel`（默认，像素风）/ `original` |
+| `theme` | string | 否 | 像素风主题，默认 `gameboy`（掌机像素） |
 
 **响应头**（`pal16`）：`X-Nav-Width/Height/Zoom/Size`、`X-Nav-Palette`（调色板 RGB565）、`X-Nav-Raw-Rgb565`（未压缩大小，便于算压缩率）、`X-Nav-Style`。
 
