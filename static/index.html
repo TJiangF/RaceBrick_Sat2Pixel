@@ -461,8 +461,17 @@
     state.zoom = Math.max(MIN_VIEW, Math.min(MAX_VIEW, Math.round(z * 2) / 2));
   }
 
-  document.getElementById('layer').addEventListener('change', (e) => {
-    state.layer = e.target.value; tiles.clear(); draw(); schedule();
+  document.getElementById('layer').addEventListener('change', async (e) => {
+    const oldDatum = datumForLayer();
+    state.layer = e.target.value;
+    const newDatum = datumForLayer();
+    if (oldDatum !== newDatum) {
+      try {
+        const r = await fetch('/api/convert?lng=' + state.lng + '&lat=' + state.lat + '&src=' + oldDatum + '&dst=' + newDatum);
+        const d = await r.json(); state.lng = d.lng; state.lat = d.lat;
+      } catch (_) {}
+    }
+    tiles.clear(); draw(); schedule();
   });
   document.getElementById('style').addEventListener('change', schedule);
   document.getElementById('theme').addEventListener('change', schedule);

@@ -160,6 +160,12 @@ def tile(layer: str, z: int, x: int, y: int):
     return Response(data, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
 
+@app.get("/api/convert")
+def convert(lng: float, lat: float, src: str = "gcj02", dst: str = "wgs84"):
+    a, b = _convert_lnglat(lng, lat, src, dst)
+    return {"lng": a, "lat": b}
+
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "version": "0.5.0"}
