@@ -92,8 +92,6 @@
         <select id="layer">
           <option value="satellite" selected>卫星图（高德）</option>
           <option value="road">路网图（天地图）</option>
-          <option value="amap_road">路网图（高德）</option>
-          <option value="tdt_satellite">卫星图（天地图）</option>
         </select>
       </div>
       <div class="row"><label>风格</label>
@@ -117,6 +115,11 @@
           <option value="satellite_alt">卫星替代</option>
         </select>
       </div>
+    </div>
+
+    <div class="block">
+      <h2>处理</h2>
+      <div class="checkbox"><input type="checkbox" id="process" checked /> 启用图像处理（像素风 / 压缩）</div>
     </div>
 
     <div class="block">
@@ -195,7 +198,7 @@
   const state = {
     lng: 121.43375, lat: 31.19875, zoom: 19.5,
     layer: 'satellite', mode: 'bbox',
-    overlay: null, showOverlay: true, opacity: 1.0,
+    overlay: null, navImg: null, showOverlay: true, opacity: 1.0,
   };
   const tiles = new Map();
   const MAX_TILES = 400;
@@ -272,6 +275,11 @@
       // nav: crosshair + ground-size box
       const boxPx = sizeM() / mpp(state.lat, state.zoom);
       const cx = w / 2, cy = h / 2;
+      if (state.showOverlay && state.navImg) {
+        ctx.globalAlpha = state.opacity;
+        ctx.drawImage(state.navImg, cx - boxPx / 2, cy - boxPx / 2, boxPx, boxPx);
+        ctx.globalAlpha = 1;
+      }
       ctx.save();
       ctx.strokeStyle = 'rgba(59,130,246,0.95)'; ctx.lineWidth = 2;
       ctx.strokeRect(cx - boxPx / 2, cy - boxPx / 2, boxPx, boxPx);
@@ -290,13 +298,20 @@
 
   // ---- preview rendering ----
   let lastStats = null;
+  function navCtx(w, h) {
+    if (!state.navImg) state.navImg = document.createElement('canvas');
+    state.navImg.width = w; state.navImg.height = h;
+    return state.navImg.getContext('2d');
+  }
   function showImage(img, w, h) {
     pcanvas.width = w; pcanvas.height = h;
     pctx.drawImage(img, 0, 0, w, h);
+    navCtx(w, h).drawImage(img, 0, 0, w, h);
   }
   function showImageData(w, h, data) {
     pcanvas.width = w; pcanvas.height = h;
     pctx.putImageData(new ImageData(data, w, h), 0, 0);
+    navCtx(w, h).putImageData(new ImageData(data, w, h), 0, 0);
   }
   function decodeRGB565(buf, w, h) {
     const b = new Uint8Array(buf); const out = new Uint8ClampedArray(w * h * 4);
@@ -339,6 +354,7 @@
   function styleVal() { return document.getElementById('style').value; }
   function themeVal() { return document.getElementById('theme').value; }
   function datumForLayer() { return (state.layer === 'road' || state.layer === 'tdt_satellite') ? 'wgs84' : 'gcj02'; }
+  function processOn() { return document.getElementById('process').checked; }
 
   // ---- requests ----
   let reqSeq = 0;
@@ -352,7 +368,7 @@
       sharpen: +document.getElementById('sharpen').value,
       format: fmt === 'rgb565' ? 'png' : fmt,  // preview as png unless jpeg
       quality: +document.getElementById('quality').value,
-      layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(),
+      layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(),
     };
     if (fmt === 'jpeg') body.format = 'jpeg';
     document.getElementById('status').textContent = '处理中…';
@@ -384,7 +400,7 @@
       device_id: 'web-ui', seq: ++navSeq,
       lng: state.lng, lat: state.lat,
       size_m: sizeM(), heading: +document.getElementById('heading').value,
-      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(),
+      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(),
     };
     document.getElementById('status').textContent = '处理中…';
     try {
@@ -474,6 +490,12 @@
     tiles.clear(); draw(); schedule();
   });
   document.getElementById('style').addEventListener('change', schedule);
+  document.getElementById('process').addEventListener('change', () => {
+    const on = processOn();
+    document.getElementById('style').disabled = !on;
+    document.getElementById('theme').disabled = !on;
+    schedule();
+  });
   document.getElementById('theme').addEventListener('change', schedule);
 
   // ---- control bindings ----
@@ -502,13 +524,13 @@
       const body = {
         corners: cornersBBox(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))),
         max_size: +document.getElementById('maxSize').value, method: document.getElementById('method').value,
-        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(),
+        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn(),
       };
       const r = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'sat2pixel.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     } else {
       const fmt = document.getElementById('navFormat').value;
-      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer() };
+      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer, style: styleVal(), theme: themeVal(), coord: datumForLayer(), process: processOn() };
       const r = await fetch('/api/v1/nav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const blob = await r.blob(); downloadBlob(blob, 'nav.' + (fmt === 'jpeg' ? 'jpg' : fmt));
     }

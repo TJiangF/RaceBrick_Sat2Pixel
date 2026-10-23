@@ -128,6 +128,7 @@ class PreviewRequest(BaseModel):
     layer: str = Field("satellite", pattern="^(satellite|road|amap_road|tdt_satellite)$")
     style: str = Field("pixel", pattern="^(pixel|original)$")
     theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")
+    process: bool = True
 
 
 _TILE_CACHE: dict = {}
@@ -257,7 +258,7 @@ async def preview(req: PreviewRequest):
         )
 
     small = downsample(image, req.max_size, req.method, req.sharpen)
-    if req.style == "pixel":
+    if req.process and req.style == "pixel":
         small, _ = pixelstyle.render(small, req.theme)
     st = stats(small, req.quality)
     body, media_type = encode(small, req.format, req.quality)
@@ -352,7 +353,7 @@ async def nav(request: Request):
             status_code=502,
         )
 
-    if req.style == "pixel":
+    if req.process and req.style == "pixel":
         pix, labels = pixelstyle.render(image, req.theme)
         pal = pixelstyle.palette(req.theme)
         w, h = pix.width, pix.height
