@@ -367,6 +367,7 @@
   document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1));
   document.getElementById('zoomOut').addEventListener('click', () => zoomBy(-1));
   wrap.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('#zoom')) return;
     dragging = true; lastX = e.clientX; lastY = e.clientY;
     wrap.classList.add('dragging'); wrap.setPointerCapture(e.pointerId);
   });

@@ -99,7 +99,11 @@ def _stitch(pts, zoom):
     px1 = (tile_x(mx_lng, zoom) - x0) * TILE_SIZE
     py0 = (tile_y(mx_lat, zoom) - y0) * TILE_SIZE
     py1 = (tile_y(mn_lat, zoom) - y0) * TILE_SIZE
-    canvas = canvas.crop((int(px0), int(py0), int(px1), int(py1)))
+    cx0, cy0 = int(px0), int(py0)
+    cx1, cy1 = int(px1), int(py1)
+    cx1 = max(cx1, cx0 + 1)   # guarantee a non-empty crop
+    cy1 = max(cy1, cy0 + 1)
+    canvas = canvas.crop((cx0, cy0, cx1, cy1))
 
     meta = {
         "zoom": zoom,
