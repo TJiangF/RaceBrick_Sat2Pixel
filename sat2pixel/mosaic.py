@@ -11,9 +11,19 @@ from sat2pixel.http import urlopen
 TILE_SIZE = 256
 MAX_ZOOM = 18  # AMap satellite imagery tops out at z18 in most regions
 MIN_ZOOM = 2
-# style=6  satellite only, style=8  satellite + road/POI labels
-SATELLITE_STYLE = 6
-_BASE_HOSTS = [f"webst0{i}.is.autonavi.com" for i in range(1, 5)]
+
+# layer -> (hosts, query string)
+LAYERS = {
+    "satellite": {
+        "hosts": [f"webst0{i}.is.autonavi.com" for i in range(1, 5)],
+        "query": "style=6",
+    },
+    "road": {
+        "hosts": [f"webrd0{i}.is.autonavi.com" for i in range(1, 5)],
+        "query": "lang=zh_cn&size=1&scale=1&style=8",
+    },
+}
+DEFAULT_LAYER = "satellite"
 
 
 def tile_x(lng: float, zoom: int) -> float:
@@ -52,10 +62,15 @@ def _candidate_zooms(pts, max_tiles=48, max_dim=8):
     return zooms
 
 
-def _fetch_one(tile):
+def _tile_url(x, y, zoom, layer):
+    cfg = LAYERS.get(layer, LAYERS[DEFAULT_LAYER])
+    host = cfg["hosts"][(x + y) % 4]
+    return f"https://{host}/appmaptile?{cfg['query']}&x={x}&y={y}&z={zoom}"
+
+
+def _fetch_one(tile, layer):
     x, y, zoom = tile
-    host = _BASE_HOSTS[(x + y) % 4]
-    url = f"https://{host}/appmaptile?style={SATELLITE_STYLE}&x={x}&y={y}&z={zoom}"
+    url = _tile_url(x, y, zoom, layer)
     last = None
     for _ in range(3):
         try:
@@ -75,12 +90,12 @@ def _is_blank(image, threshold=6.0):
     return variance < threshold**2
 
 
-def _stitch(pts, zoom):
+def _stitch(pts, zoom, layer=DEFAULT_LAYER):
     x0, y0, x1, y1 = _grid(pts, zoom)
     coords = [(x, y, zoom) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)]
     tiles = {}
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(_fetch_one, c): c for c in coords}
+        futures = {pool.submit(_fetch_one, c, layer): c for c in coords}
         for fut in as_completed(futures):
             x, y, data = fut.result()
             tiles[(x, y)] = Image.open(io.BytesIO(data)).convert("RGB")
@@ -113,18 +128,18 @@ def _stitch(pts, zoom):
     return canvas, meta
 
 
-def fetch_satellite(corners, zoom=None):
+def fetch_satellite(corners, zoom=None, layer=DEFAULT_LAYER):
     """Return (image, zoom, meta) covering the given corner points."""
     pts = [(c["lng"], c["lat"]) for c in corners]
     if zoom is not None:
-        image, meta = _stitch(pts, zoom)
+        image, meta = _stitch(pts, zoom, layer)
         return image, zoom, meta
 
     # auto: try the highest workable zoom, fall back if tiles are blank
     last = None
     for z in _candidate_zooms(pts):
-        image, meta = _stitch(pts, z)
-        if not _is_blank(image) or z == MIN_ZOOM:
+        image, meta = _stitch(pts, z, layer)
+        if layer != "satellite" or z == MIN_ZOOM or not _is_blank(image):
             return image, z, meta
         last = (image, z, meta)
     return last

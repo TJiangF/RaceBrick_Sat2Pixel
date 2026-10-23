@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>RaceBrick Sat2Pixel — 240×240 压缩预览</title>
+<title>RaceBrick Sat2Pixel — 调试台</title>
 <style>
   :root {
     --bg: #14161a; --panel: #1e2126; --border: #2c313a;
@@ -15,7 +15,7 @@
   #app { display: flex; height: 100vh; }
   #map-wrap { flex: 1; position: relative; overflow: hidden; cursor: grab; }
   #map-wrap.dragging { cursor: grabbing; }
-  canvas { position: absolute; inset: 0; }
+  canvas#map { position: absolute; inset: 0; }
   #hud { position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,.55);
     color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 6px; pointer-events: none; }
   #zoom { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -23,11 +23,11 @@
     background: rgba(0,0,0,.55); color: #fff; border: 1px solid rgba(255,255,255,.2);
     border-radius: 6px; cursor: pointer; padding: 0; }
   #zoom button:hover { background: rgba(59,130,246,.8); }
-  #sidebar { width: 330px; background: var(--panel); border-left: 1px solid var(--border);
+  #sidebar { width: 340px; background: var(--panel); border-left: 1px solid var(--border);
     overflow-y: auto; padding: 16px; }
   h1 { font-size: 15px; margin: 0 0 4px; }
   .sub { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
-  .block { margin-bottom: 18px; }
+  .block { margin-bottom: 16px; }
   .block h2 { font-size: 12px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .5px; margin: 0 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
   #search { display: flex; gap: 6px; position: relative; }
@@ -44,20 +44,23 @@
   button:hover { filter: brightness(1.1); }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
     margin-bottom: 8px; font-size: 13px; }
-  .row label { color: var(--muted); min-width: 80px; }
-  .row .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
+  .row label { color: var(--muted); min-width: 84px; }
+  .row .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
   input[type=range] { flex: 1; accent-color: var(--accent); }
   select { flex: 1; background: #14161a; border: 1px solid var(--border); color: var(--text);
     padding: 5px 8px; border-radius: 6px; font-size: 13px; }
   .checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
   .checkbox input { accent-color: var(--accent); }
-  #previewWrap { position: relative; border: 1px solid var(--border); border-radius: 6px;
-    background: #0c0d0f; padding: 6px; }
-  #previewImg { width: 100%; display: block; image-rendering: pixelated; }
-  #previewStats { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; background: #14161a; border: 1px solid var(--border); color: var(--muted); }
+  .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #previewWrap { border: 1px solid var(--border); border-radius: 6px; background: #0c0d0f; padding: 6px; }
+  #previewCanvas { width: 100%; display: block; image-rendering: pixelated; }
+  #previewStats { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.7; }
   .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .btns button { flex: 1; font-size: 12px; padding: 6px 8px; }
   #status { font-size: 11px; color: var(--muted); margin-top: 8px; min-height: 14px; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -72,7 +75,7 @@
   </div>
   <div id="sidebar">
     <h1>RaceBrick Sat2Pixel</h1>
-    <div class="sub">卫星图 → 240×240 方框压缩（拖动地图 / 按钮缩放，方框内即输出区域）</div>
+    <div class="sub">卫星图 / 路网图 · 两种场景交互调试</div>
 
     <div class="block">
       <h2>地址搜索</h2>
@@ -84,58 +87,73 @@
     </div>
 
     <div class="block">
-      <h2>显示</h2>
-      <div class="checkbox"><input type="checkbox" id="showOverlay" checked /> 叠加压缩结果</div>
-      <div class="row">
-        <label>透明度</label>
-        <input type="range" id="opacity" min="0" max="100" value="100" />
-        <span class="val" id="opacityVal">100%</span>
+      <h2>图像类型</h2>
+      <div class="row"><label>底图</label>
+        <select id="layer">
+          <option value="satellite" selected>卫星图</option>
+          <option value="road">路网图</option>
+        </select>
       </div>
-      <div class="checkbox"><input type="checkbox" id="baseLabels" /> 底图叠加路网标注</div>
     </div>
 
     <div class="block">
-      <h2>压缩</h2>
-      <div class="row">
-        <label>最大边长</label>
-        <input type="range" id="maxSize" min="64" max="480" step="8" value="240" />
-        <span class="val" id="maxSizeVal">240</span>
+      <h2>场景</h2>
+      <div class="tabs">
+        <button id="tabBbox" class="active">① 框选区域</button>
+        <button id="tabNav">② 实时导航</button>
       </div>
+      <div class="sub" id="modeHint" style="margin:0 0 8px"></div>
+    </div>
+
+    <!-- Scenario 1 -->
+    <div id="panelBbox" class="block">
+      <h2>框选压缩</h2>
+      <div class="row"><label>最大边长</label><input type="range" id="maxSize" min="64" max="480" step="8" value="240" /><span class="val" id="maxSizeVal">240</span></div>
       <div class="row"><label>缩放算法</label>
         <select id="method">
           <option value="lanczos" selected>Lanczos（最清晰）</option>
           <option value="box">Box（面积平均）</option>
-          <option value="bilinear">Bilinear（双线性）</option>
-          <option value="nearest">Nearest（最近邻）</option>
+          <option value="bilinear">Bilinear</option>
+          <option value="nearest">Nearest</option>
         </select>
       </div>
-      <div class="row">
-        <label>锐化</label>
-        <input type="range" id="sharpen" min="0" max="2.0" step="0.1" value="0.4" />
-        <span class="val" id="sharpenVal">0.4</span>
-      </div>
+      <div class="row"><label>锐化</label><input type="range" id="sharpen" min="0" max="2" step="0.1" value="0.4" /><span class="val" id="sharpenVal">0.4</span></div>
       <div class="row"><label>格式</label>
         <select id="format">
-          <option value="png" selected>PNG（无损）</option>
-          <option value="jpeg">JPEG（最小）</option>
-          <option value="rgb565">RGB565（MCU 直显）</option>
+          <option value="png" selected>PNG</option>
+          <option value="jpeg">JPEG</option>
+          <option value="rgb565">RGB565</option>
         </select>
       </div>
-      <div class="row">
-        <label>JPEG 质量</label>
-        <input type="range" id="quality" min="1" max="100" value="85" />
-        <span class="val" id="qualityVal">85</span>
+      <div class="row"><label>JPEG 质量</label><input type="range" id="quality" min="1" max="100" value="85" /><span class="val" id="qualityVal">85</span></div>
+      <div class="checkbox"><input type="checkbox" id="showOverlay" checked /> 在地图上叠加结果</div>
+      <div class="row"><label>透明度</label><input type="range" id="opacity" min="0" max="100" value="100" /><span class="val" id="opacityVal">100%</span></div>
+    </div>
+
+    <!-- Scenario 2 -->
+    <div id="panelNav" class="block hidden">
+      <h2>导航压缩</h2>
+      <div class="row"><label>地面边长</label><input type="range" id="navSizeM" min="50" max="1500" step="10" value="300" /><span class="val" id="navSizeMVal">300m</span></div>
+      <div class="row"><label>朝向</label><input type="range" id="heading" min="0" max="359" step="1" value="0" /><span class="val" id="headingVal">0°</span></div>
+      <div class="row"><label>输出尺寸</label><input type="range" id="navSize" min="128" max="320" step="16" value="240" /><span class="val" id="navSizeVal">240</span></div>
+      <div class="row"><label>格式</label>
+        <select id="navFormat">
+          <option value="pal16" selected>PAL16（16色+RLE）</option>
+          <option value="rgb565">RGB565</option>
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select>
       </div>
+      <div class="checkbox"><input type="checkbox" id="navFit" checked /> 切换/改范围时自动适配地图缩放</div>
+      <div class="sub" style="margin:0">地图中心十字 = 当前位置；方框 = 导航范围（北朝上参考）</div>
     </div>
 
     <div class="block">
       <h2>预览</h2>
-      <div id="previewWrap"><img id="previewImg" alt="preview" /></div>
+      <div id="previewWrap"><canvas id="previewCanvas" width="240" height="240"></canvas></div>
       <div id="previewStats">—</div>
       <div class="btns">
-        <button id="dlPng">PNG</button>
-        <button id="dlJpeg">JPEG</button>
-        <button id="dlRgb565">RGB565</button>
+        <button id="dlBtn">下载所选格式</button>
       </div>
       <div id="status"></div>
     </div>
@@ -148,349 +166,377 @@
   const ctx = canvas.getContext('2d');
   const wrap = document.getElementById('map-wrap');
   const hud = document.getElementById('hud');
+  const pcanvas = document.getElementById('previewCanvas');
+  const pctx = pcanvas.getContext('2d');
 
   const state = {
-    lng: 121.43375,
-    lat: 31.19875,
-    zoom: 19.5,
-    baseStyle: 6,
-    overlay: null,
-    showOverlay: true,
-    opacity: 1.0,
+    lng: 121.43375, lat: 31.19875, zoom: 19.5,
+    layer: 'satellite', mode: 'bbox',
+    overlay: null, showOverlay: true, opacity: 1.0,
   };
   const tiles = new Map();
   const MAX_TILES = 400;
-  let overlayUrl = null, previewUrl = null;
-  let lastStats = null;
+  let previewUrl = null, navSeq = 0;
 
+  // ---- coordinate helpers ----
   function worldX(lng) { return (lng + 180) / 360; }
-  function worldY(lat) {
-    const r = lat * Math.PI / 180;
-    return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
-  }
+  function worldY(lat) { const r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; }
   function lngFromWorld(x) { return x * 360 - 180; }
-  function latFromWorld(y) {
-    const n = Math.PI * (1 - 2 * y);
-    return (180 / Math.PI) * (2 * Math.atan(Math.exp(n)) - Math.PI / 2);
-  }
+  function latFromWorld(y) { const n = Math.PI * (1 - 2 * y); return (180 / Math.PI) * (2 * Math.atan(Math.exp(n)) - Math.PI / 2); }
   const scale = () => 256 * Math.pow(2, state.zoom);
+  const MIN_VIEW = 2, MAX_VIEW = 20;
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const w = wrap.clientWidth, h = wrap.clientHeight;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { w, h };
   }
-
   function viewport() {
     const { w, h } = resize();
-    const cx = worldX(state.lng) * scale();
-    const cy = worldY(state.lat) * scale();
-    return { w, h, topLeftX: cx - w / 2, topLeftY: cy - h / 2 };
+    return { w, h, topLeftX: worldX(state.lng) * scale() - w / 2, topLeftY: worldY(state.lat) * scale() - h / 2 };
   }
+  function squareBox(w, h) { const side = Math.min(w, h); return { left: (w - side) / 2, top: (h - side) / 2, side }; }
 
-  function tileKey(z, x, y) { return z + '/' + x + '/' + y; }
+  // ---- tiles ----
+  function tileUrl(z, x, y) {
+    const s = (((x + y) % 4) + 1);
+    if (state.layer === 'road')
+      return 'https://webrd0' + s + '.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=' + x + '&y=' + y + '&z=' + z;
+    return 'https://webst0' + s + '.is.autonavi.com/appmaptile?style=6&x=' + x + '&y=' + y + '&z=' + z;
+  }
   function ensureTile(z, x, y) {
-    const key = tileKey(z, x, y);
+    const key = state.layer + '/' + z + '/' + x + '/' + y;
     let t = tiles.get(key);
     if (t) { tiles.delete(key); tiles.set(key, t); return t; }
     t = { img: new Image(), loaded: false };
     t.img.onload = () => { t.loaded = true; draw(); };
-    t.img.src = 'https://webst0' + (((x + y) % 4) + 1) + '.is.autonavi.com/appmaptile?style=' +
-      state.baseStyle + '&x=' + x + '&y=' + y + '&z=' + z;
+    t.img.src = tileUrl(z, x, y);
     tiles.set(key, t);
     if (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value);
     return t;
   }
 
+  // ---- map draw ----
+  function mpp(lat, zoom) { return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom); }
+
   function draw() {
     const { w, h, topLeftX, topLeftY } = viewport();
     ctx.clearRect(0, 0, w, h);
-
     const tz = Math.max(2, Math.min(18, Math.floor(state.zoom)));
-    const ts = 256 * Math.pow(2, state.zoom - tz);   // tile size in view px
+    const ts = 256 * Math.pow(2, state.zoom - tz);
     const x0 = Math.floor(topLeftX / ts), x1 = Math.floor((topLeftX + w) / ts);
     const y0 = Math.floor(topLeftY / ts), y1 = Math.floor((topLeftY + h) / ts);
-    for (let x = x0; x <= x1; x++) {
+    for (let x = x0; x <= x1; x++)
       for (let y = y0; y <= y1; y++) {
         const t = ensureTile(tz, x, y);
         if (t.loaded) ctx.drawImage(t.img, x * ts - topLeftX, y * ts - topLeftY, ts, ts);
       }
+
+    if (state.mode === 'bbox') {
+      const b = squareBox(w, h);
+      if (state.showOverlay && state.overlay) {
+        ctx.globalAlpha = state.opacity;
+        ctx.drawImage(state.overlay, b.left, b.top, b.side, b.side);
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(0, 0, w, b.top); ctx.fillRect(0, b.top, b.left, b.side);
+      ctx.fillRect(b.left + b.side, b.top, w - b.left - b.side, b.side);
+      ctx.fillRect(0, b.top + b.side, w, h - b.top - b.side);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(b.left + 0.5, b.top + 0.5, b.side - 1, b.side - 1);
+    } else {
+      // nav: crosshair + ground-size box
+      const boxPx = sizeM() / mpp(state.lat, state.zoom);
+      const cx = w / 2, cy = h / 2;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(59,130,246,0.95)'; ctx.lineWidth = 2;
+      ctx.strokeRect(cx - boxPx / 2, cy - boxPx / 2, boxPx, boxPx);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - 12, cy); ctx.lineTo(cx + 12, cy);
+      ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy + 12);
+      ctx.stroke();
+      ctx.restore();
     }
 
-    const b = squareBox(w, h);
-    if (state.showOverlay && state.overlay) {
-      ctx.globalAlpha = state.opacity;
-      ctx.drawImage(state.overlay, b.left, b.top, b.side, b.side);
-      ctx.globalAlpha = 1;
-    }
-
-    // dim outside the output square + outline
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.fillRect(0, 0, w, b.top);
-    ctx.fillRect(0, b.top, b.left, b.side);
-    ctx.fillRect(b.left + b.side, b.top, w - b.left - b.side, b.side);
-    ctx.fillRect(0, b.top + b.side, w, h - b.top - b.side);
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(b.left + 0.5, b.top + 0.5, b.side - 1, b.side - 1);
-
-    let txt = 'zoom ' + state.zoom.toFixed(1);
-    if (lastStats) txt += ' · ' + lastStats.width + '×' + lastStats.height + ' · JPEG ' + lastStats.jpeg;
+    let txt = 'zoom ' + state.zoom.toFixed(1) + ' · ' + (state.layer === 'road' ? '路网' : '卫星');
+    if (lastStats) txt += ' · ' + lastStats.summary;
     hud.textContent = txt;
   }
 
-  function squareBox(w, h) {
-    const side = Math.min(w, h);
-    return { left: (w - side) / 2, top: (h - side) / 2, side };
+  // ---- preview rendering ----
+  let lastStats = null;
+  function showImage(img, w, h) {
+    pcanvas.width = w; pcanvas.height = h;
+    pctx.drawImage(img, 0, 0, w, h);
+  }
+  function showImageData(w, h, data) {
+    pcanvas.width = w; pcanvas.height = h;
+    pctx.putImageData(new ImageData(data, w, h), 0, 0);
+  }
+  function decodeRGB565(buf, w, h) {
+    const b = new Uint8Array(buf); const out = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      const v = (b[i * 2] << 8) | b[i * 2 + 1];
+      const r = (v >> 11) & 31, g = (v >> 5) & 63, bl = v & 31;
+      out[i * 4] = (r << 3) | (r >> 2); out[i * 4 + 1] = (g << 2) | (g >> 4); out[i * 4 + 2] = (bl << 3) | (bl >> 2); out[i * 4 + 3] = 255;
+    }
+    return out;
+  }
+  function decodePal16(buf) {
+    const dv = new DataView(buf);
+    const w = dv.getUint16(0, true), h = dv.getUint16(2, true), pc = dv.getUint16(4, true);
+    let off = 6; const pal = [];
+    for (let i = 0; i < pc; i++) { const p = dv.getUint16(off, true); off += 2; const r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31; pal.push([(r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)]); }
+    const total = w * h, out = new Uint8ClampedArray(total * 4); let i = 0;
+    const bytes = new Uint8Array(buf);
+    while (off < bytes.length && i < total) {
+      const v = bytes[off++]; let run = (v >> 4) + 1;
+      if ((v >> 4) === 15) run = 16 + bytes[off++];
+      const c = pal[v & 15];
+      for (let k = 0; k < run && i < total; k++) { out[i * 4] = c[0]; out[i * 4 + 1] = c[1]; out[i * 4 + 2] = c[2]; out[i * 4 + 3] = 255; i++; }
+    }
+    return { w, h, data: out };
   }
 
-  function corners() {
+  function fmtBytes(n) { return n >= 1024 ? (n / 1024).toFixed(1) + 'KB' : n + 'B'; }
+
+  function cornersBBox() {
     const { w, h, topLeftX, topLeftY } = viewport();
     const b = squareBox(w, h);
     const nwLng = lngFromWorld((topLeftX + b.left) / scale());
     const nwLat = latFromWorld((topLeftY + b.top) / scale());
     const seLng = lngFromWorld((topLeftX + b.left + b.side) / scale());
     const seLat = latFromWorld((topLeftY + b.top + b.side) / scale());
-    return [
-      { lng: nwLng, lat: seLat },
-      { lng: seLng, lat: seLat },
-      { lng: seLng, lat: nwLat },
-      { lng: nwLng, lat: nwLat },
-    ];
+    return [{ lng: nwLng, lat: seLat }, { lng: seLng, lat: seLat }, { lng: seLng, lat: nwLat }, { lng: nwLng, lat: nwLat }];
   }
 
-  function options() {
-    return {
+  function sizeM() { return +document.getElementById('navSizeM').value; }
+
+  // ---- requests ----
+  let reqSeq = 0;
+  async function requestPreview() {
+    const my = ++reqSeq;
+    const fmt = document.getElementById('format').value;
+    const body = {
+      corners: cornersBBox(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))),
       max_size: +document.getElementById('maxSize').value,
       method: document.getElementById('method').value,
       sharpen: +document.getElementById('sharpen').value,
+      format: fmt === 'rgb565' ? 'png' : fmt,  // preview as png unless jpeg
       quality: +document.getElementById('quality').value,
+      layer: state.layer,
     };
-  }
-
-  function fmtBytes(n) {
-    if (n >= 1024) return (n / 1024).toFixed(1) + 'KB';
-    return n + 'B';
-  }
-
-  let reqSeq = 0;
-  async function requestPreview(format) {
-    const mySeq = ++reqSeq;
-    const body = Object.assign(
-      { corners: corners(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))) },
-      options()
-    );
-    if (format) body.format = format;
+    if (fmt === 'jpeg') body.format = 'jpeg';
     document.getElementById('status').textContent = '处理中…';
     try {
-      const resp = await fetch('/api/preview', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (mySeq !== reqSeq) return null;
+      const resp = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (my !== reqSeq) return null;
       if (!resp.ok) { document.getElementById('status').textContent = '错误 ' + resp.status; return null; }
       const blob = await resp.blob();
-      if (mySeq !== reqSeq) return null;
-      const w = resp.headers.get('X-Preview-Width');
-      const h = resp.headers.get('X-Preview-Height');
-      const png = resp.headers.get('X-Preview-Png');
-      const jpeg = resp.headers.get('X-Preview-Jpeg');
-      const rgb565 = resp.headers.get('X-Preview-Rgb565');
-      lastStats = {
-        width: +w, height: +h,
-        png: fmtBytes(+png), jpeg: fmtBytes(+jpeg), rgb565: fmtBytes(+rgb565),
-      };
-
-      if (format) {
-        document.getElementById('status').textContent = '已下载 ' + w + '×' + h;
-        return blob;
-      }
-
-      // preview (PNG)
+      const png = resp.headers.get('X-Preview-Png'), jpeg = resp.headers.get('X-Preview-Jpeg'), rgb = resp.headers.get('X-Preview-Rgb565');
+      const pw = resp.headers.get('X-Preview-Width'), ph = resp.headers.get('X-Preview-Height');
+      lastStats = { summary: pw + '×' + ph + ' · PNG ' + fmtBytes(+png) + ' · JPEG ' + fmtBytes(+jpeg) };
       const url = URL.createObjectURL(blob);
       const img = new Image();
-      img.onload = () => { state.overlay = img; draw(); };
+      img.onload = () => { state.overlay = img; showImage(img, img.width, img.height); draw(); };
       img.src = url;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      previewUrl = url;
-      document.getElementById('previewImg').src = url;
+      if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = url;
       document.getElementById('previewStats').innerHTML =
-        '<b>' + w + '×' + h + '</b> · PNG ' + lastStats.png +
-        ' · JPEG ' + lastStats.jpeg + ' · RGB565 ' + lastStats.rgb565;
-      document.getElementById('status').textContent = '完成 · zoom ' + state.zoom.toFixed(1);
+        '<b>' + pw + '×' + ph + '</b> · PNG ' + fmtBytes(+png) + ' · JPEG ' + fmtBytes(+jpeg) + ' · RGB565 ' + fmtBytes(+rgb);
+      document.getElementById('status').textContent = '完成 · ' + (state.layer === 'road' ? '路网' : '卫星');
+      draw();
       return blob;
-    } catch (e) {
-      if (mySeq === reqSeq) document.getElementById('status').textContent = '请求失败';
-      return null;
-    }
+    } catch (e) { if (my === reqSeq) document.getElementById('status').textContent = '请求失败'; return null; }
   }
 
-  function download(blob, name) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  async function requestNav() {
+    const my = ++reqSeq;
+    const fmt = document.getElementById('navFormat').value;
+    const body = {
+      device_id: 'web-ui', seq: ++navSeq,
+      lng: state.lng, lat: state.lat,
+      size_m: sizeM(), heading: +document.getElementById('heading').value,
+      size: +document.getElementById('navSize').value, format: fmt, layer: state.layer,
+    };
+    document.getElementById('status').textContent = '处理中…';
+    try {
+      const resp = await fetch('/api/v1/nav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (my !== reqSeq) return null;
+      if (!resp.ok) { document.getElementById('status').textContent = '错误 ' + resp.status; return null; }
+      const buf = await resp.arrayBuffer();
+      const w = +resp.headers.get('X-Nav-Width'), h = +resp.headers.get('X-Nav-Height');
+      const size = buf.byteLength, raw = w * h * 2;
+
+      if (fmt === 'pal16') {
+        const d = decodePal16(buf); showImageData(d.w, d.h, d.data);
+      } else if (fmt === 'rgb565') {
+        showImageData(w, h, decodeRGB565(buf, w, h));
+      } else {
+        const blob = new Blob([buf], { type: 'image/' + fmt });
+        const url = URL.createObjectURL(blob);
+        const img = new Image(); img.onload = () => { showImage(img, img.width, img.height); draw(); }; img.src = url;
+        if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = url;
+      }
+      const ratio = (raw / size).toFixed(1);
+      lastStats = { summary: w + '×' + h + ' · ' + fmt.toUpperCase() + ' ' + fmtBytes(size) };
+      document.getElementById('previewStats').innerHTML =
+        '<b>' + w + '×' + h + '</b> · ' + fmt.toUpperCase() + ' ' + fmtBytes(size) +
+        ' · 原始 RGB565 ' + fmtBytes(raw) + ' · <b>' + ratio + '×</b>';
+      document.getElementById('status').textContent = '完成 · ' + (state.layer === 'road' ? '路网' : '卫星');
+      draw();
+      return buf;
+    } catch (e) { if (my === reqSeq) document.getElementById('status').textContent = '请求失败'; return null; }
   }
-  document.getElementById('dlPng').addEventListener('click', async () => {
-    const b = await requestPreview('png'); if (b) download(b, 'sat2pixel.png');
-  });
-  document.getElementById('dlJpeg').addEventListener('click', async () => {
-    const b = await requestPreview('jpeg'); if (b) download(b, 'sat2pixel.jpg');
-  });
-  document.getElementById('dlRgb565').addEventListener('click', async () => {
-    const b = await requestPreview('rgb565'); if (b) download(b, 'sat2pixel.rgb565');
-  });
+
+  function refresh() { return state.mode === 'bbox' ? requestPreview() : requestNav(); }
 
   let debounce = null;
-  function schedulePreview() {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => requestPreview(), 150);
-  }
+  function schedule() { clearTimeout(debounce); debounce = setTimeout(refresh, 160); }
 
-  // pan / zoom
+  // ---- zoom / pan ----
   let dragging = false, lastX = 0, lastY = 0;
-
-  function zoomBy(dir) {
-    const next = Math.max(2, Math.min(20, state.zoom + dir * 0.5));
-    state.zoom = Math.round(next * 10) / 10;
-    draw();
-    schedulePreview();
-  }
+  function zoomBy(dir) { state.zoom = Math.max(MIN_VIEW, Math.min(MAX_VIEW, Math.round((state.zoom + dir * 0.5) * 10) / 10)); draw(); schedule(); }
   document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1));
   document.getElementById('zoomOut').addEventListener('click', () => zoomBy(-1));
-  wrap.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('#zoom')) return;
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
-    wrap.classList.add('dragging'); wrap.setPointerCapture(e.pointerId);
-  });
+  wrap.addEventListener('pointerdown', (e) => { if (e.target.closest('#zoom')) return; dragging = true; lastX = e.clientX; lastY = e.clientY; wrap.classList.add('dragging'); wrap.setPointerCapture(e.pointerId); });
   wrap.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    const dx = e.clientX - lastX, dy = e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY;
     state.lng = lngFromWorld((worldX(state.lng) * scale() - dx) / scale());
     state.lat = latFromWorld((worldY(state.lat) * scale() - dy) / scale());
     draw();
   });
-  wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); schedulePreview(); });
+  wrap.addEventListener('pointerup', () => { dragging = false; wrap.classList.remove('dragging'); schedule(); });
 
-  document.getElementById('showOverlay').addEventListener('change', (e) => {
-    state.showOverlay = e.target.checked; draw();
-  });
-  document.getElementById('opacity').addEventListener('input', (e) => {
-    state.opacity = +e.target.value / 100;
-    document.getElementById('opacityVal').textContent = e.target.value + '%';
-    draw();
-  });
-  document.getElementById('baseLabels').addEventListener('change', (e) => {
-    state.baseStyle = e.target.checked ? 8 : 6;
-    tiles.clear(); draw();
+  // ---- mode / layer ----
+  function setMode(m) {
+    state.mode = m;
+    document.getElementById('panelBbox').classList.toggle('hidden', m !== 'bbox');
+    document.getElementById('panelNav').classList.toggle('hidden', m !== 'nav');
+    document.getElementById('tabBbox').classList.toggle('active', m === 'bbox');
+    document.getElementById('tabNav').classList.toggle('active', m === 'nav');
+    document.getElementById('modeHint').textContent = m === 'bbox'
+      ? '白色方框内区域 → 240×240（地图拖动选位置）'
+      : '中心十字 = 当前位置；方框 = 导航范围';
+    if (m === 'nav') fitNavZoom();
+    draw(); schedule();
+  }
+  document.getElementById('tabBbox').addEventListener('click', () => setMode('bbox'));
+  document.getElementById('tabNav').addEventListener('click', () => setMode('nav'));
+
+  function fitNavZoom() {
+    if (!document.getElementById('navFit').checked) return;
+    const { w, h } = viewport();
+    const target = 0.8 * Math.min(w, h);
+    const cos = Math.cos(state.lat * Math.PI / 180);
+    const z = Math.log2(target * 156543.03392 * cos / sizeM());
+    state.zoom = Math.max(MIN_VIEW, Math.min(MAX_VIEW, Math.round(z * 2) / 2));
+  }
+
+  document.getElementById('layer').addEventListener('change', (e) => {
+    state.layer = e.target.value; tiles.clear(); draw(); schedule();
   });
 
-  const bindings = [
-    ['maxSize', 'maxSizeVal'], ['sharpen', 'sharpenVal'], ['quality', 'qualityVal'],
-  ];
-  for (const [id, valId] of bindings) {
+  // ---- control bindings ----
+  const bind = (id, valId, suffix = '', onChange = schedule) => {
     const el = document.getElementById(id), v = document.getElementById(valId);
-    v.textContent = el.value;
-    el.addEventListener('input', () => { v.textContent = el.value; schedulePreview(); });
-  }
-  document.getElementById('method').addEventListener('change', schedulePreview);
-  document.getElementById('format').addEventListener('change', schedulePreview);
+    if (v) v.textContent = el.value + suffix;
+    el.addEventListener('input', () => { if (v) v.textContent = el.value + suffix; onChange(); });
+  };
+  bind('maxSize', 'maxSizeVal');
+  bind('sharpen', 'sharpenVal');
+  bind('quality', 'qualityVal');
+  bind('navSizeM', 'navSizeMVal', 'm', () => { if (state.mode === 'nav') fitNavZoom(); draw(); schedule(); });
+  bind('heading', 'headingVal', '°');
+  bind('navSize', 'navSizeVal');
+  document.getElementById('method').addEventListener('change', schedule);
+  document.getElementById('format').addEventListener('change', schedule);
+  document.getElementById('navFormat').addEventListener('change', schedule);
+  document.getElementById('showOverlay').addEventListener('change', (e) => { state.showOverlay = e.target.checked; draw(); });
+  document.getElementById('opacity').addEventListener('input', (e) => { state.opacity = +e.target.value / 100; document.getElementById('opacityVal').textContent = e.target.value + '%'; draw(); });
+  document.getElementById('navFit').addEventListener('change', () => {});
 
-  // search + autocomplete
-  const addressEl = document.getElementById('address');
-  const suggestEl = document.getElementById('suggest');
+  // ---- download ----
+  document.getElementById('dlBtn').addEventListener('click', async () => {
+    if (state.mode === 'bbox') {
+      const fmt = document.getElementById('format').value;
+      const body = {
+        corners: cornersBBox(), zoom: Math.max(2, Math.min(18, Math.floor(state.zoom))),
+        max_size: +document.getElementById('maxSize').value, method: document.getElementById('method').value,
+        sharpen: +document.getElementById('sharpen').value, format: fmt, quality: +document.getElementById('quality').value, layer: state.layer,
+      };
+      const r = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const blob = await r.blob(); downloadBlob(blob, 'sat2pixel.' + (fmt === 'jpeg' ? 'jpg' : fmt));
+    } else {
+      const fmt = document.getElementById('navFormat').value;
+      const body = { device_id: 'web-ui', seq: ++navSeq, lng: state.lng, lat: state.lat, size_m: sizeM(), heading: +document.getElementById('heading').value, size: +document.getElementById('navSize').value, format: fmt, layer: state.layer };
+      const r = await fetch('/api/v1/nav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const blob = await r.blob(); downloadBlob(blob, 'nav.' + (fmt === 'jpeg' ? 'jpg' : fmt));
+    }
+  });
+  function downloadBlob(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+
+  // ---- search ----
+  const addressEl = document.getElementById('address'), suggestEl = document.getElementById('suggest');
   let tips = [], active = -1;
-
-  function escapeHtml(s) {
-    return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
+  const esc = (s) => (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function hideSuggest() { suggestEl.style.display = 'none'; active = -1; }
   function renderSuggest(list) {
-    tips = list; active = -1;
-    suggestEl.innerHTML = '';
+    tips = list; active = -1; suggestEl.innerHTML = '';
     if (!list.length) { hideSuggest(); return; }
     list.forEach((t, i) => {
-      const d = document.createElement('div');
-      d.className = 'suggest-item';
+      const d = document.createElement('div'); d.className = 'suggest-item';
       const sub = [t.district, t.address].filter(Boolean).join(' · ');
-      d.innerHTML = '<div>' + escapeHtml(t.name) + '</div>' + (sub ? '<div class="d">' + escapeHtml(sub) + '</div>' : '');
+      d.innerHTML = '<div>' + esc(t.name) + '</div>' + (sub ? '<div class="d">' + esc(sub) + '</div>' : '');
       d.addEventListener('mousedown', (e) => { e.preventDefault(); selectTip(t); });
-      d.addEventListener('mouseenter', () => setActive(i));
+      d.addEventListener('mouseenter', () => { active = i; Array.from(suggestEl.children).forEach((c, j) => c.classList.toggle('active', j === i)); });
       suggestEl.appendChild(d);
     });
     suggestEl.style.display = 'block';
   }
-  function setActive(i) {
-    active = i;
-    Array.from(suggestEl.children).forEach((c, j) => c.classList.toggle('active', j === i));
-  }
   function selectTip(t) {
-    addressEl.value = t.name;
-    hideSuggest();
-    state.lng = t.lng; state.lat = t.lat; state.zoom = 19.5;
-    draw(); schedulePreview();
-    document.getElementById('status').textContent = [t.district, t.address].filter(Boolean).join(' · ') || t.name;
+    addressEl.value = t.name; hideSuggest();
+    state.lng = t.lng; state.lat = t.lat;
+    if (state.mode === 'nav') fitNavZoom(); else state.zoom = 19.5;
+    draw(); schedule();
   }
-
   document.getElementById('go').addEventListener('click', doSearch);
   let tipSeq = 0, tipDebounce = null;
   addressEl.addEventListener('input', (e) => {
-    const kw = e.target.value.trim();
-    clearTimeout(tipDebounce);
+    const kw = e.target.value.trim(); clearTimeout(tipDebounce);
     if (!kw) { hideSuggest(); return; }
     tipDebounce = setTimeout(async () => {
       const my = ++tipSeq;
-      try {
-        const resp = await fetch('/api/inputtips?keywords=' + encodeURIComponent(kw));
-        const data = await resp.json();
-        if (my !== tipSeq) return;
-        renderSuggest(data.tips || []);
-      } catch (err) { hideSuggest(); }
+      try { const r = await fetch('/api/inputtips?keywords=' + encodeURIComponent(kw)); const d = await r.json(); if (my === tipSeq) renderSuggest(d.tips || []); } catch (err) { hideSuggest(); }
     }, 200);
   });
   addressEl.addEventListener('keydown', (e) => {
     const open = suggestEl.style.display === 'block' && tips.length;
-    if (e.key === 'ArrowDown' && open) { e.preventDefault(); setActive((active + 1) % tips.length); }
-    else if (e.key === 'ArrowUp' && open) { e.preventDefault(); setActive((active - 1 + tips.length) % tips.length); }
-    else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (open) selectTip(active >= 0 ? tips[active] : tips[0]);
-      else doSearch();
-    } else if (e.key === 'Escape') { hideSuggest(); }
+    if (e.key === 'ArrowDown' && open) { e.preventDefault(); active = (active + 1) % tips.length; Array.from(suggestEl.children).forEach((c, j) => c.classList.toggle('active', j === active)); }
+    else if (e.key === 'ArrowUp' && open) { e.preventDefault(); active = (active - 1 + tips.length) % tips.length; Array.from(suggestEl.children).forEach((c, j) => c.classList.toggle('active', j === active)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (open) selectTip(active >= 0 ? tips[active] : tips[0]); else doSearch(); }
+    else if (e.key === 'Escape') hideSuggest();
   });
-  document.addEventListener('mousedown', (e) => {
-    if (!document.getElementById('search').contains(e.target)) hideSuggest();
-  });
-
+  document.addEventListener('mousedown', (e) => { if (!document.getElementById('search').contains(e.target)) hideSuggest(); });
   async function doSearch() {
-    const addr = addressEl.value.trim();
-    if (!addr) return;
-    hideSuggest();
+    const addr = addressEl.value.trim(); if (!addr) return; hideSuggest();
     document.getElementById('status').textContent = '搜索地址…';
     try {
-      const resp = await fetch('/api/geocode?address=' + encodeURIComponent(addr));
-      const data = await resp.json();
-      if (!resp.ok) { document.getElementById('status').textContent = data.message || '未找到'; return; }
-      state.lng = data.lng; state.lat = data.lat; state.zoom = 19.5;
-      draw(); schedulePreview();
-      document.getElementById('status').textContent = data.formatted || addr;
-    } catch (e) {
-      document.getElementById('status').textContent = '搜索失败';
-    }
+      const r = await fetch('/api/geocode?address=' + encodeURIComponent(addr)); const d = await r.json();
+      if (!r.ok) { document.getElementById('status').textContent = d.message || '未找到'; return; }
+      state.lng = d.lng; state.lat = d.lat;
+      if (state.mode === 'nav') fitNavZoom(); else state.zoom = 19.5;
+      draw(); schedule(); document.getElementById('status').textContent = d.formatted || addr;
+    } catch (e) { document.getElementById('status').textContent = '搜索失败'; }
   }
 
-  window.addEventListener('resize', () => { resize(); draw(); schedulePreview(); });
-  resize();
-  draw();
-  schedulePreview();
+  window.addEventListener('resize', () => { resize(); draw(); schedule(); });
+  resize(); setMode('bbox');
 })();
 </script>
 </body>

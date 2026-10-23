@@ -34,7 +34,7 @@ def square_corners(cx, cy, size_m):
     ]
 
 
-def build_nav_image(cx, cy, size_m, size_px=240, heading=0.0):
+def build_nav_image(cx, cy, size_m, size_px=240, heading=0.0, layer="road"):
     """Fetch the square area centred on (cx, cy) and return a size_px RGB image.
 
     heading (degrees clockwise from north) rotates the map so that direction is
@@ -46,7 +46,7 @@ def build_nav_image(cx, cy, size_m, size_px=240, heading=0.0):
     fetch_size = size_m * ratio
     zoom = zoom_for_size(cy, fetch_size, int(size_px * ratio * 2))  # 2x supersample
     corners = square_corners(cx, cy, fetch_size)
-    image, used_zoom, _ = fetch_satellite(corners, zoom)
+    image, used_zoom, _ = fetch_satellite(corners, zoom, layer)
 
     if rotate:
         image = image.rotate(heading, resample=Image.Resampling.BICUBIC, expand=False)

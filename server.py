@@ -55,8 +55,9 @@ def _cache_put(key, body, media_type, headers):
             _CACHE.pop(k, None)
 
 
-def _mosaic_get_or_fetch(corners, zoom):
+def _mosaic_get_or_fetch(corners, zoom, layer="satellite"):
     key = (
+        layer,
         zoom,
         round(min(c["lng"] for c in corners), 5),
         round(min(c["lat"] for c in corners), 5),
@@ -66,7 +67,7 @@ def _mosaic_get_or_fetch(corners, zoom):
     item = _MOSAIC.get(key)
     if item and item[0] > time.time():
         return item[1], True
-    image, zoom, meta = fetch_satellite(corners, zoom)
+    image, zoom, meta = fetch_satellite(corners, zoom, layer)
     _MOSAIC[key] = (time.time() + _MOSAIC_TTL, image)
     while len(_MOSAIC) > _MOSAIC_MAX:
         oldest = min(_MOSAIC, key=lambda k: _MOSAIC[k][0])
@@ -114,6 +115,7 @@ class PreviewRequest(BaseModel):
     format: str = Field("png", pattern="^(png|jpeg|rgb565)$")
     quality: int = Field(85, ge=1, le=100)
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")
+    layer: str = Field("satellite", pattern="^(satellite|road)$")
 
 
 @app.get("/healthz")
@@ -192,7 +194,7 @@ async def preview(req: PreviewRequest):
     corners = [c.model_dump() for c in req.corners]
     corners = _convert_corners(corners, req.coord)
     try:
-        image, _ = _mosaic_get_or_fetch(corners, req.zoom)
+        image, _ = _mosaic_get_or_fetch(corners, req.zoom, req.layer)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
@@ -240,7 +242,7 @@ async def satellite(request: Request):
     corners = _convert_corners(corners, req.coord)
     corners = _expand_square(corners)
     try:
-        image, _ = _mosaic_get_or_fetch(corners, None)
+        image, _ = _mosaic_get_or_fetch(corners, None, req.layer)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
@@ -288,7 +290,7 @@ async def nav(request: Request):
         lng, lat = wgs84_to_gcj02(lng, lat)
 
     try:
-        image, zoom = build_nav_image(lng, lat, req.size_m, req.size, req.heading)
+        image, zoom = build_nav_image(lng, lat, req.size_m, req.size, req.heading, req.layer)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
