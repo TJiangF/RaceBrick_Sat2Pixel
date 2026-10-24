@@ -142,7 +142,7 @@ RaceBrick_Sat2Pixel/
 
 ## 场景 2：实时导航 → 压缩图
 
-设备只发**当前坐标**（可选朝向），服务端截取以该点为中心、固定地面范围的正方形，压缩后回传。适合高频刷新（导航每几百毫秒一帧），因此采用 16 色 + RLE 压缩。
+设备只发**当前坐标**（可选朝向），服务端截取以该点为中心、固定地面范围的正方形，压缩后回传。支持三种图：**风格化路网 / 卫星 / 融合**，用 `mode` 一步选定。完整协议见 [docs/API.md](docs/API.md)。
 
 `POST /api/v1/nav`：
 
@@ -172,6 +172,8 @@ RaceBrick_Sat2Pixel/
 | `layer` | string | 否 | `road`（默认）/ `satellite` |
 | `style` | string | 否 | `pixel`（默认，像素风）/ `original` |
 | `theme` | string | 否 | 像素风主题，默认 `gameboy`（掌机像素） |
+| `mode` | string | 否 | `auto`（默认，用 layer/style）/ `road`（风格化路网）/ `satellite`（卫星）/ `blend`（融合）|
+| `sat_opacity` | int | 否 | 融合时卫星透明度 0–100（0=路网，100=卫星），默认 100 |
 
 **响应头**（`pal16`）：`X-Nav-Width/Height/Zoom/Size`、`X-Nav-Palette`（调色板 RGB565）、`X-Nav-Raw-Rgb565`（未压缩大小，便于算压缩率）、`X-Nav-Style`。
 
