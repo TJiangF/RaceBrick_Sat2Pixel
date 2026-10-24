@@ -348,6 +348,15 @@ async def nav(request: Request):
     except ValidationError as exc:
         return Response(content=exc.json(), media_type="application/json", status_code=422)
 
+    if req.mode == "road":
+        req.layer, req.style, req.sat_opacity = "road", "pixel", 100
+    elif req.mode == "satellite":
+        req.layer, req.sat_opacity = "satellite", 100
+    elif req.mode == "blend":
+        req.layer = "satellite"
+        if req.sat_opacity >= 100:
+            req.sat_opacity = 60
+
     key = ("nav", req.device_id, req.seq)
     cached = _cache_get(key)
     if cached is not None:

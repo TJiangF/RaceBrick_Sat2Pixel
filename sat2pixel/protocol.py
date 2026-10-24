@@ -48,3 +48,4 @@ class NavRequest(BaseModel):
     theme: str = Field("gameboy", pattern="^(original|vice|gta|cyber|paper|minimal|blueprint|gameboy|radar|compass|satellite_alt)$")
     process: bool = True
     sat_opacity: int = Field(100, ge=0, le=100)
+    mode: str = Field("auto", pattern="^(auto|road|satellite|blend)$")
