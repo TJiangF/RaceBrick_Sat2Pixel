@@ -50,11 +50,14 @@ def _cache_get(key):
     return item
 
 
-def _cache_put(key, body, media_type, headers):
-    _CACHE[key] = (time.time() + DEDUP_TTL_S, body, media_type, headers)
+def _cache_put(key, body, media_type, headers, ttl=DEDUP_TTL_S):
+    _CACHE[key] = (time.time() + ttl, body, media_type, headers)
     if len(_CACHE) > 512:
-        for k in [k for k, v in _CACHE.items() if v[0] < time.time()]:
+        now = time.time()
+        for k in [k for k, v in _CACHE.items() if v[0] < now]:
             _CACHE.pop(k, None)
+        while len(_CACHE) > 512:
+            _CACHE.pop(min(_CACHE, key=lambda k: _CACHE[k][0]), None)
 
 
 def _mosaic_get_or_fetch(corners, zoom, layer="satellite"):
@@ -301,7 +304,9 @@ async def satellite(request: Request):
     except ValidationError as exc:
         return Response(content=exc.json(), media_type="application/json", status_code=422)
 
-    key = (req.device_id, req.seq)
+    fp = (req.max_size, req.format, req.layer, req.coord,
+          tuple((round(c.lng, 6), round(c.lat, 6)) for c in req.corners))
+    key = (req.device_id, req.seq, fp)
     cached = _cache_get(key)
     if cached is not None:
         _, cbody, ctype, cheaders = cached
@@ -357,7 +362,10 @@ async def nav(request: Request):
         if req.sat_opacity >= 100:
             req.sat_opacity = 60
 
-    key = ("nav", req.device_id, req.seq)
+    fp = (round(req.lng, 6), round(req.lat, 6), req.size_m, req.heading, req.size,
+          req.format, req.layer, req.style, req.theme, req.process,
+          req.sat_opacity, req.coord)
+    key = ("nav", req.device_id, req.seq, fp)
     cached = _cache_get(key)
     if cached is not None:
         _, cbody, ctype, cheaders = cached
@@ -419,7 +427,7 @@ async def nav(request: Request):
             "X-Nav-Style": style_tag,
         }
 
-    _cache_put(key, body_bytes, media_type, headers)
+    _cache_put(key, body_bytes, media_type, headers, ttl=60)
     return Response(content=body_bytes, media_type=media_type, headers=headers)
 
 
