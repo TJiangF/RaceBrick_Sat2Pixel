@@ -30,7 +30,7 @@ from sat2pixel.protocol import Corner, NavRequest, SatelliteRequest, DEDUP_TTL_S
 
 AMAP_WEB_KEY = os.environ.get("AMAP_WEB_KEY", "")
 
-app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.6.0")
+app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.7.0")
 
 # (device_id, seq) -> (expires_at, body, media_type, headers)
 _CACHE: dict = {}
@@ -174,7 +174,7 @@ def convert(lng: float, lat: float, src: str = "gcj02", dst: str = "wgs84"):
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.6.0"}
+    return {"status": "ok", "version": "0.7.0"}
 
 
 @app.get("/api/inputtips")
@@ -363,9 +363,11 @@ async def nav(request: Request):
             req.sat_opacity = 60
 
     span_m = effective_span_m(req.size_m, req.zoom)
-    fp = (round(req.lng, 6), round(req.lat, 6), round(span_m, 3), req.heading, req.size,
-          round(req.zoom, 3), req.format, req.layer, req.style, req.theme, req.process,
-          req.sat_opacity, req.coord)
+    out_w = req.width or req.size
+    out_h = req.height or req.size
+    fp = (round(req.lng, 6), round(req.lat, 6), round(span_m, 3), req.heading,
+          req.size, out_w, out_h, round(req.zoom, 3), req.format, req.layer,
+          req.style, req.theme, req.process, req.sat_opacity, req.coord)
     key = ("nav", req.device_id, req.seq, fp)
     cached = _cache_get(key)
     if cached is not None:
@@ -375,14 +377,17 @@ async def nav(request: Request):
     try:
         if req.layer == "satellite":
             slng, slat = _convert_lnglat(req.lng, req.lat, req.coord, "gcj02")
-            image, zoom = build_nav_image(slng, slat, span_m, req.size, req.heading, "satellite")
+            image, zoom = build_nav_image(slng, slat, span_m, out_w, req.heading, "satellite",
+                                          height_px=out_h)
             if req.sat_opacity < 100:
                 rlng, rlat = _convert_lnglat(req.lng, req.lat, req.coord, "wgs84")
-                road_img, _ = build_nav_image(rlng, rlat, span_m, req.size, req.heading, "road")
+                road_img, _ = build_nav_image(rlng, rlat, span_m, out_w, req.heading, "road",
+                                              height_px=out_h)
                 image = Image.blend(road_img, image, req.sat_opacity / 100.0)
         else:
             lng, lat = _convert_lnglat(req.lng, req.lat, req.coord, layer_datum(req.layer))
-            image, zoom = build_nav_image(lng, lat, span_m, req.size, req.heading, req.layer)
+            image, zoom = build_nav_image(lng, lat, span_m, out_w, req.heading, req.layer,
+                                          height_px=out_h)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',

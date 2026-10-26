@@ -20,8 +20,9 @@
 
 ## 场景②：`POST /api/v1/nav`（三种图，可变尺寸 + zoom）
 
-输出是**任意方形尺寸**（`size`，16–512 px），不再是固定 240×240。设备当前仍请求
-240×240 上屏，但服务端按请求渲染；`zoom` 控制**地面覆盖范围**，画面像素尺寸不变：
+输出尺寸可变：方形用 `size`（16–512 px），非方形用 `width` + `height`
+（各 16–512）。设备普通导航请求 240×240，全屏导航请求 320×240。
+`zoom` 控制**地面覆盖范围**，画面像素尺寸不变：
 
 - `zoom = 1.0`：地面宽度 = `size_m`
 - `zoom > 1.0`：放大（地面范围变小、细节更大）
@@ -78,7 +79,9 @@ RaceBrick 设备端只开放 `0.5–4.0`（0.5 步进），避免请求无意义
 | `lng`,`lat` | float | — | 当前位置 |
 | `size_m` | float | 300 | 基准地面边长（米）20–10000；实际宽度再除以 `zoom` |
 | `heading` | float | 0 | 朝向（正北顺时针），0=北朝上 |
-| `size` | int | 240 | **可变**输出像素边长（方形）16–512 |
+| `size` | int | 240 | **可变**方形输出边长，16–512 |
+| `width` | int | — | 可选非方形输出宽，16–512；与 `height` 一起用 |
+| `height` | int | — | 可选非方形输出高，16–512 |
 | `zoom` | float | 1.0 | 缩放倍率，0.25–8.0；>1 放大、<1 缩小 |
 | `format` | string | `pal16` | `pal16` / `rgb565` / `png` / `jpeg` |
 | `mode` | string | `auto` | `road` / `satellite` / `blend` / `auto` |
@@ -98,7 +101,8 @@ X-Nav-Palette（pal16 时，如 #8E0E,#E7DA,#334A,#08C4）
 ```
 
 客户端应以 `Width/Height` 为准分配/校验图像，不要假定 240。`X-Nav-Zoom-Factor`
-和 `X-Nav-Span-M` 可用于 UI 显示与调试。
+和 `X-Nav-Span-M` 可用于 UI 显示与调试。非方形请求下 `size_m` 仍表示**宽度**方向
+的地面米数，高度按 `height/width` 比例折算。
 
 实测体积（240×240，`size_m=300`，`format=pal16`）：
 
@@ -170,7 +174,7 @@ X-Nav-Palette（pal16 时，如 #8E0E,#E7DA,#334A,#08C4）
 3. 卫星图层**永远是原图**，`style/theme/process` 对其无效。
 4. `blend` 需要天地图（会额外拉路网瓦片）；`sat_opacity=100` 时等同卫星，不拉路网。
 5. 朝向 `heading≠0` 时图像旋转成「朝向朝上」；为避免黑角，服务端 1.5× 超采样后中心裁切。
-6. `size` 可变（16–512），服务端最多按 1024 px 拉取源图再缩放，防止大图请求拖垮服务器。
+6. `size` / `width` / `height` 可变（16–512），服务端最多按 1024 px 拉取源图再缩放，防止大图请求拖垮服务器。全屏设备请求 `width=320,height=240`。
 7. `zoom` 是**绝对倍率**（不是增量）。设备端每次放大/缩小后，用新的 `zoom` + 新 `seq` 请求；重传必须复用同一 `seq` 和 `zoom`。
 8. 服务端内置瓦片缓存（600 s），同一区域连续移动/缩放时不会反复拉上游瓦片。
 9. `Content-Length` 已设置，按字节读满；读取到 `-1`(chunked) 需兜底。
@@ -186,4 +190,6 @@ curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":1
 curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":2,"lng":121.43375,"lat":31.19875,"size_m":300,"size":240,"zoom":2.0,"format":"pal16","mode":"satellite","coord":"wgs84"}' -o sat.pal16 -D -
 # 融合 60% 卫星
 curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":3,"lng":121.43375,"lat":31.19875,"size_m":300,"size":320,"zoom":0.5,"format":"pal16","mode":"blend","sat_opacity":60,"coord":"wgs84"}' -o blend60.pal16 -D -
+# 全屏 320x240
+curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":4,"lng":121.43375,"lat":31.19875,"size_m":400,"width":320,"height":240,"zoom":1.0,"format":"pal16","mode":"road","theme":"gameboy","coord":"wgs84"}' -o full.pal16 -D -
 ```

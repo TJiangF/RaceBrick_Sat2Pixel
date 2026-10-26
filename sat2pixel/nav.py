@@ -35,9 +35,14 @@ def effective_span_m(size_m, zoom):
 
 
 def square_corners(cx, cy, size_m):
-    half = size_m / 2.0
-    dlat = half / 111320.0
-    dlng = half / (111320.0 * math.cos(math.radians(cy)))
+    return rect_corners(cx, cy, size_m, size_m)
+
+
+def rect_corners(cx, cy, width_m, height_m):
+    half_w = width_m / 2.0
+    half_h = height_m / 2.0
+    dlat = half_h / 111320.0
+    dlng = half_w / (111320.0 * math.cos(math.radians(cy)))
     return [
         {"lng": cx - dlng, "lat": cy - dlat},
         {"lng": cx + dlng, "lat": cy - dlat},
@@ -46,18 +51,50 @@ def square_corners(cx, cy, size_m):
     ]
 
 
-def build_nav_image(cx, cy, size_m, size_px=240, heading=0.0, layer="road"):
-    """Fetch the square area centred on (cx, cy) and return a size_px RGB image.
+def _build_nav_rect(cx, cy, width_m, width_px, height_px, heading, layer):
+    """Rectangular viewport: width_m is the ground width, height follows pixels."""
+    height_m = width_m * height_px / width_px
+    rotate = (heading % 360.0) != 0.0
+    pixels = min(_MAX_FETCH_PX, max(16, int(round(width_px * 2))))
+    zoom = zoom_for_size(cy, width_m, pixels)
+
+    if rotate:
+        # Fetch a square large enough for the rotated viewport, then crop the
+        # requested rectangle out of its centre.
+        side = max(width_m, height_m) * 1.5
+        corners = rect_corners(cx, cy, side, side)
+        image, used_zoom, _ = fetch_satellite(corners, zoom, layer)
+        image = image.rotate(heading, resample=Image.Resampling.BICUBIC, expand=False)
+    else:
+        corners = rect_corners(cx, cy, width_m, height_m)
+        image, used_zoom, _ = fetch_satellite(corners, zoom, layer)
+
+    mpp = ground_mpp(cy, used_zoom)
+    crop_w = min(image.width, max(1, int(round(width_m / mpp))))
+    crop_h = min(image.height, max(1, int(round(height_m / mpp))))
+    left = (image.width - crop_w) // 2
+    top = (image.height - crop_h) // 2
+    image = image.crop((left, top, left + crop_w, top + crop_h))
+    return image.resize((width_px, height_px), Image.Resampling.LANCZOS), used_zoom
+
+
+def build_nav_image(cx, cy, size_m, size_px=240, heading=0.0, layer="road", height_px=None):
+    """Fetch the area centred on (cx, cy) and return an RGB image.
 
     heading (degrees clockwise from north) rotates the map so that direction is
-    up; a 1.5x oversample avoids black corners after rotation, then a centre crop
-    keeps exactly size_m ground coverage.
+    up. Square output keeps the original 1.5x oversample + centre-crop path;
+    rectangular output (e.g. 320x240 fullscreen) uses a dedicated viewport path.
     """
+    width_px = int(size_px)
+    height_px = width_px if height_px is None else int(height_px)
+    if width_px != height_px:
+        return _build_nav_rect(cx, cy, float(size_m), width_px, height_px, heading, layer)
+
     rotate = (heading % 360.0) != 0.0
     ratio = 1.5 if rotate else 1.0
     fetch_size = size_m * ratio
     # 2x supersample for a crisp downsample, but never fetch a monster image.
-    pixels = min(_MAX_FETCH_PX, max(16, int(round(size_px * ratio * 2))))
+    pixels = min(_MAX_FETCH_PX, max(16, int(round(width_px * ratio * 2))))
     zoom = zoom_for_size(cy, fetch_size, pixels)
     corners = square_corners(cx, cy, fetch_size)
     image, used_zoom, _ = fetch_satellite(corners, zoom, layer)
@@ -70,4 +107,4 @@ def build_nav_image(cx, cy, size_m, size_px=240, heading=0.0, layer="road"):
         top = (f - crop) // 2
         image = image.crop((left, top, left + crop, top + crop))
 
-    return downsample(image, size_px, "lanczos", 0.4), used_zoom
+    return downsample(image, width_px, "lanczos", 0.4), used_zoom

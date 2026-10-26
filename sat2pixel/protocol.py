@@ -41,6 +41,8 @@ class NavRequest(BaseModel):
     size_m: float = Field(300, ge=20, le=10000)   # base ground width centred on position
     heading: float = Field(0.0, ge=-360, le=360)  # degrees clockwise from north; 0 = north-up
     size: int = Field(240, ge=16, le=512)         # output pixels (square, variable)
+    width: int | None = Field(None, ge=16, le=512)   # optional rectangular output
+    height: int | None = Field(None, ge=16, le=512)
     zoom: float = Field(1.0, ge=0.25, le=8.0)     # >1 zoom in, <1 zoom out
     format: str = Field("pal16", pattern="^(pal16|rgb565|png|jpeg)$")
     coord: str = Field("gcj02", pattern="^(gcj02|wgs84)$")

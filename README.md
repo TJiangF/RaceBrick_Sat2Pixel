@@ -142,7 +142,7 @@ RaceBrick_Sat2Pixel/
 
 ## 场景 2：实时导航 → 压缩图
 
-设备发送**当前坐标 + 目标尺寸 + zoom**，服务端截取以该点为中心的正方形并压缩回传。输出尺寸可变（`size` 16–512），`zoom` 只改变**地面覆盖范围**（有效宽度 = `size_m / zoom`），不改变像素尺寸。支持三种图：**风格化路网 / 卫星 / 融合**，用 `mode` 一步选定。完整协议见 [docs/API.md](docs/API.md)。
+设备发送**当前坐标 + 目标尺寸 + zoom**，服务端截取以该点为中心的正方形并压缩回传。输出尺寸可变（方形 `size`，非方形 `width`+`height`，各 16–512），`zoom` 只改变**地面覆盖范围**（有效宽度 = `size_m / zoom`），不改变像素尺寸。设备全屏导航会请求 `320×240`。支持三种图：**风格化路网 / 卫星 / 融合**，用 `mode` 一步选定。完整协议见 [docs/API.md](docs/API.md)。
 
 `POST /api/v1/nav`：
 
@@ -155,6 +155,8 @@ RaceBrick_Sat2Pixel/
   "size_m": 300,
   "heading": 45,
   "size": 240,
+  "width": 240,
+  "height": 240,
   "zoom": 1.5,
   "format": "pal16",
   "coord": "wgs84"
@@ -167,7 +169,8 @@ RaceBrick_Sat2Pixel/
 | `lng` / `lat` | float | 是 | 当前坐标 |
 | `size_m` | float | 否 | 基准地面边长（米），默认 300；实际宽度 = `size_m / zoom` |
 | `heading` | float | 否 | 朝向（度，正北顺时针）；`0`=正北朝上，其它值旋转成「朝向朝上」 |
-| `size` | int | 否 | **可变**输出像素边长（16–512），默认 240 |
+| `size` | int | 否 | **可变**方形输出边长（16–512），默认 240 |
+| `width` / `height` | int | 否 | 可选非方形输出（各 16–512）；全屏用 `320×240` |
 | `zoom` | float | 否 | 缩放倍率（0.25–8.0），>1 放大、<1 缩小；默认 1.0 |
 | `format` | string | 否 | `pal16`（默认，压缩）/ `rgb565` / `png` / `jpeg` |
 | `coord` | string | 否 | `gcj02`（默认）/ `wgs84` |
