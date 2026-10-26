@@ -1,14 +1,14 @@
 # RaceBrick_Sat2Pixel
 
-GNSS 设备（ESP32-S3）通过 WiFi 上传坐标 → 服务端拉取高德（AMap）卫星影像 → 压缩成 240×240 后回传。支持两种使用场景：
+GNSS 设备（ESP32-S3）通过 WiFi 上传坐标 → 服务端拉取高德（AMap）卫星影像 → 按请求尺寸渲染 / 压缩后回传（支持可变尺寸与 zoom）。支持两种使用场景：
 
 | 场景 | 输入 | 输出 | 接口 |
 |------|------|------|------|
 | **1. 轨迹四角** | 一段轨迹算出的最外侧四点（bbox） | 覆盖该区域的 240×240 卫星图（RGB565） | `POST /api/v1/satellite` |
-| **2. 实时导航** | 当前坐标（+ 朝向），固定地面范围 | 240×240 **16 色 + RLE 压缩**导航图 | `POST /api/v1/nav` |
+| **2. 实时导航** | 当前坐标（+ 朝向 + zoom），可变地面范围 | 可变尺寸（16–512）**16 色 + RLE** 导航图 | `POST /api/v1/nav` |
 
 ```
-ESP32-S3 ──(WiFi, HTTP POST JSON)──> FastAPI ──> 高德瓦片 ──> 缩放/裁剪到 240×240
+ESP32-S3 ──(WiFi, HTTP POST JSON)──> FastAPI ──> 高德/天地图瓦片 ──> 按 size/zoom 缩放裁剪
                                         │
   场景1: 4 角 bbox ────────────────────┼──> RGB565 原始帧 (≈115 KB)
   场景2: 中心点+朝向 ───────────────────┴──> 16 色 + RLE 压缩包 (≈30 KB)
@@ -29,7 +29,7 @@ RaceBrick_Sat2Pixel/
 │   ├── navpacket.py        # 16 色中位切分 + RLE（导航图压缩）
 │   ├── protocol.py         # 请求模型 / 错误码 / 重传策略
 │   └── http.py             # 带 CA 兜底的 TLS 请求
-├── static/index.html       # 预览台（拖动地图 + 240×240 预览）
+├── static/index.html       # 预览台（拖动地图 + 可变尺寸预览）
 ├── examples/
 │   ├── sample_bbox.json
 │   └── esp32_upload/esp32_upload.ino   # 两种场景 + 重传 + 包解码示例
@@ -142,7 +142,7 @@ RaceBrick_Sat2Pixel/
 
 ## 场景 2：实时导航 → 压缩图
 
-设备只发**当前坐标**（可选朝向），服务端截取以该点为中心、固定地面范围的正方形，压缩后回传。支持三种图：**风格化路网 / 卫星 / 融合**，用 `mode` 一步选定。完整协议见 [docs/API.md](docs/API.md)。
+设备发送**当前坐标 + 目标尺寸 + zoom**，服务端截取以该点为中心的正方形并压缩回传。输出尺寸可变（`size` 16–512），`zoom` 只改变**地面覆盖范围**（有效宽度 = `size_m / zoom`），不改变像素尺寸。支持三种图：**风格化路网 / 卫星 / 融合**，用 `mode` 一步选定。完整协议见 [docs/API.md](docs/API.md)。
 
 `POST /api/v1/nav`：
 
@@ -155,6 +155,7 @@ RaceBrick_Sat2Pixel/
   "size_m": 300,
   "heading": 45,
   "size": 240,
+  "zoom": 1.5,
   "format": "pal16",
   "coord": "wgs84"
 }
@@ -164,9 +165,10 @@ RaceBrick_Sat2Pixel/
 |------|------|------|------|
 | `device_id` / `seq` | | 是 | 同上（幂等重传） |
 | `lng` / `lat` | float | 是 | 当前坐标 |
-| `size_m` | float | 否 | 以该点为中心的地面边长（米），默认 300 |
+| `size_m` | float | 否 | 基准地面边长（米），默认 300；实际宽度 = `size_m / zoom` |
 | `heading` | float | 否 | 朝向（度，正北顺时针）；`0`=正北朝上，其它值旋转成「朝向朝上」 |
-| `size` | int | 否 | 输出像素边长，默认 240 |
+| `size` | int | 否 | **可变**输出像素边长（16–512），默认 240 |
+| `zoom` | float | 否 | 缩放倍率（0.25–8.0），>1 放大、<1 缩小；默认 1.0 |
 | `format` | string | 否 | `pal16`（默认，压缩）/ `rgb565` / `png` / `jpeg` |
 | `coord` | string | 否 | `gcj02`（默认）/ `wgs84` |
 | `layer` | string | 否 | `road`（默认）/ `satellite` |
@@ -175,7 +177,7 @@ RaceBrick_Sat2Pixel/
 | `mode` | string | 否 | `auto`（默认，用 layer/style）/ `road`（风格化路网）/ `satellite`（卫星）/ `blend`（融合）|
 | `sat_opacity` | int | 否 | 融合时卫星透明度 0–100（0=路网，100=卫星），默认 100 |
 
-**响应头**（`pal16`）：`X-Nav-Width/Height/Zoom/Size`、`X-Nav-Palette`（调色板 RGB565）、`X-Nav-Raw-Rgb565`（未压缩大小，便于算压缩率）、`X-Nav-Style`。
+**响应头**（`pal16`）：`X-Nav-Width/Height`、`X-Nav-Zoom`（内部瓦片级）、`X-Nav-Zoom-Factor`（请求倍率）、`X-Nav-Span-M`（实际地面宽度）、`X-Nav-Size`、`X-Nav-Palette`（调色板 RGB565）、`X-Nav-Raw-Rgb565`、`X-Nav-Style`。客户端应按 `Width/Height` 解码，不要写死 240。
 
 ### 导航图压缩算法（参考 zyn950929/MotoNav）
 
@@ -199,7 +201,7 @@ RaceBrick_Sat2Pixel/
 | 6 | 32 | 16 × RGB565（uint16 LE） |
 | 38 | N | RLE 数据 |
 
-**实测**（240×240，`size_m=300`，`pal16` vs RGB565 115 KB）：路网图 ≈ **17 KB（≈6.8×）**，卫星图 ≈ **30 KB（≈3.8×）**。路网图色块平坦、压缩率更高；卫星图纹理越复杂越吃亏。
+**实测**（240×240，`size_m=300`，`pal16` vs RGB565 115 KB）：路网图 ≈ **17 KB（≈6.8×）**，卫星图 ≈ **30 KB（≈3.8×）**。尺寸越大包越大；服务端最多按 1024 px 拉源图再缩放，避免大尺寸请求拖垮服务。
 
 ---
 
@@ -255,7 +257,7 @@ curl -X POST http://127.0.0.1:2020/api/v1/satellite -H 'Content-Type: applicatio
 
 # 场景2：实时导航（16 色 RLE）
 curl -X POST http://127.0.0.1:2020/api/v1/nav -H 'Content-Type: application/json' \
-  -d '{"device_id":"d","seq":2,"lng":121.43375,"lat":31.19875,"size_m":300,"heading":45,"format":"pal16","coord":"wgs84"}' \
+  -d '{"device_id":"d","seq":2,"lng":121.43375,"lat":31.19875,"size_m":300,"size":240,"zoom":1.5,"heading":45,"format":"pal16","coord":"wgs84"}' \
   -o nav.pal16 -D -
 ```
 

@@ -18,7 +18,17 @@
 | GET | `/api/convert?lng=&lat=&src=&dst=` | GCJ-02 ↔ WGS-84 |
 | GET | `/healthz` | 健康检查 |
 
-## 场景②：`POST /api/v1/nav`（三种图）
+## 场景②：`POST /api/v1/nav`（三种图，可变尺寸 + zoom）
+
+输出是**任意方形尺寸**（`size`，16–512 px），不再是固定 240×240。设备当前仍请求
+240×240 上屏，但服务端按请求渲染；`zoom` 控制**地面覆盖范围**，画面像素尺寸不变：
+
+- `zoom = 1.0`：地面宽度 = `size_m`
+- `zoom > 1.0`：放大（地面范围变小、细节更大）
+- `zoom < 1.0`：缩小（地面范围变大）
+
+有效地面宽度 = `size_m / zoom`，服务端再夹到 20–10000 m。`zoom` 范围 `0.25–8.0`；
+RaceBrick 设备端只开放 `0.5–4.0`（0.5 步进），避免请求无意义的比例。
 
 `mode` 一步选定图像类型（推荐设备用这个）：
 
@@ -39,6 +49,7 @@
   "size_m": 300,
   "heading": 0,
   "size": 240,
+  "zoom": 1.5,
   "format": "pal16",
   "mode": "blend",
   "sat_opacity": 60,
@@ -65,9 +76,10 @@
 | `device_id` | string | — | 设备标识（幂等键） |
 | `seq` | uint32 | — | 单调递增（幂等键；重传复用） |
 | `lng`,`lat` | float | — | 当前位置 |
-| `size_m` | float | 300 | 以该点为中心的地面边长（米）20–10000 |
+| `size_m` | float | 300 | 基准地面边长（米）20–10000；实际宽度再除以 `zoom` |
 | `heading` | float | 0 | 朝向（正北顺时针），0=北朝上 |
-| `size` | int | 240 | 输出像素边长（方形）16–512 |
+| `size` | int | 240 | **可变**输出像素边长（方形）16–512 |
+| `zoom` | float | 1.0 | 缩放倍率，0.25–8.0；>1 放大、<1 缩小 |
 | `format` | string | `pal16` | `pal16` / `rgb565` / `png` / `jpeg` |
 | `mode` | string | `auto` | `road` / `satellite` / `blend` / `auto` |
 | `sat_opacity` | int | 100 | 融合时卫星透明度 0–100（0=路网，100=卫星）|
@@ -78,10 +90,15 @@
 
 响应头：
 ```
-X-Nav-Seq, X-Nav-Width, X-Nav-Height, X-Nav-Zoom,
+X-Nav-Seq, X-Nav-Width, X-Nav-Height,
+X-Nav-Zoom（内部瓦片级）, X-Nav-Zoom-Factor（请求的 zoom）,
+X-Nav-Span-M（实际地面宽度，米）,
 X-Nav-Size, X-Nav-Raw-Rgb565, X-Nav-Style,
 X-Nav-Palette（pal16 时，如 #8E0E,#E7DA,#334A,#08C4）
 ```
+
+客户端应以 `Width/Height` 为准分配/校验图像，不要假定 240。`X-Nav-Zoom-Factor`
+和 `X-Nav-Span-M` 可用于 UI 显示与调试。
 
 实测体积（240×240，`size_m=300`，`format=pal16`）：
 
@@ -153,17 +170,20 @@ X-Nav-Palette（pal16 时，如 #8E0E,#E7DA,#334A,#08C4）
 3. 卫星图层**永远是原图**，`style/theme/process` 对其无效。
 4. `blend` 需要天地图（会额外拉路网瓦片）；`sat_opacity=100` 时等同卫星，不拉路网。
 5. 朝向 `heading≠0` 时图像旋转成「朝向朝上」；为避免黑角，服务端 1.5× 超采样后中心裁切。
-6. `Content-Length` 已设置，按字节读满；读取到 `-1`(chunked) 需兜底。
-7. 端口 2020 目前对公网开放；如需关闭，改用域名 `https://racebrick.tfworks.cn`（nginx 反代到 127.0.0.1:2020）。
+6. `size` 可变（16–512），服务端最多按 1024 px 拉取源图再缩放，防止大图请求拖垮服务器。
+7. `zoom` 是**绝对倍率**（不是增量）。设备端每次放大/缩小后，用新的 `zoom` + 新 `seq` 请求；重传必须复用同一 `seq` 和 `zoom`。
+8. 服务端内置瓦片缓存（600 s），同一区域连续移动/缩放时不会反复拉上游瓦片。
+9. `Content-Length` 已设置，按字节读满；读取到 `-1`(chunked) 需兜底。
+10. 端口 2020 目前对公网开放；如需关闭，改用域名 `https://racebrick.tfworks.cn`（nginx 反代到 127.0.0.1:2020）。
 
 ## curl 示例
 
 ```bash
 B=http://47.100.182.210:2020/api/v1/nav
 # 风格化路网(GameBoy)
-curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":1,"lng":121.43375,"lat":31.19875,"size_m":300,"format":"pal16","mode":"road","theme":"gameboy","coord":"wgs84"}' -o road.pal16 -D -
+curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":1,"lng":121.43375,"lat":31.19875,"size_m":300,"size":240,"zoom":1.0,"format":"pal16","mode":"road","theme":"gameboy","coord":"wgs84"}' -o road.pal16 -D -
 # 卫星
-curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":2,"lng":121.43375,"lat":31.19875,"size_m":300,"format":"pal16","mode":"satellite","coord":"wgs84"}' -o sat.pal16 -D -
+curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":2,"lng":121.43375,"lat":31.19875,"size_m":300,"size":240,"zoom":2.0,"format":"pal16","mode":"satellite","coord":"wgs84"}' -o sat.pal16 -D -
 # 融合 60% 卫星
-curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":3,"lng":121.43375,"lat":31.19875,"size_m":300,"format":"pal16","mode":"blend","sat_opacity":60,"coord":"wgs84"}' -o blend60.pal16 -D -
+curl -X POST $B -H 'Content-Type: application/json' -d '{"device_id":"d","seq":3,"lng":121.43375,"lat":31.19875,"size_m":300,"size":320,"zoom":0.5,"format":"pal16","mode":"blend","sat_opacity":60,"coord":"wgs84"}' -o blend60.pal16 -D -
 ```

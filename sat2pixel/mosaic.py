@@ -3,6 +3,8 @@
 import io
 import math
 import os
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PIL import Image
@@ -41,6 +43,36 @@ LAYERS = {
     },
 }
 DEFAULT_LAYER = "satellite"
+
+# Raw tile cache shared by nav/preview/satellite. Navigation keeps re-stitching
+# almost the same tiles while driving, so this removes most upstream latency
+# and the frame-to-frame jitter it caused.
+_TILE_CACHE: dict = {}
+_TILE_CACHE_TTL = 600
+_TILE_CACHE_MAX = 2048
+_TILE_CACHE_LOCK = threading.Lock()
+
+
+def _tile_cache_get(key):
+    with _TILE_CACHE_LOCK:
+        item = _TILE_CACHE.get(key)
+        if item is None:
+            return None
+        if item[0] < time.time():
+            _TILE_CACHE.pop(key, None)
+            return None
+        return item[1]
+
+
+def _tile_cache_put(key, data):
+    with _TILE_CACHE_LOCK:
+        _TILE_CACHE[key] = (time.time() + _TILE_CACHE_TTL, data)
+        if len(_TILE_CACHE) > _TILE_CACHE_MAX:
+            now = time.time()
+            for k in [k for k, v in _TILE_CACHE.items() if v[0] < now]:
+                _TILE_CACHE.pop(k, None)
+            while len(_TILE_CACHE) > _TILE_CACHE_MAX:
+                _TILE_CACHE.pop(next(iter(_TILE_CACHE)), None)
 
 
 def layer_datum(layer):
@@ -96,12 +128,18 @@ def _candidate_zooms(pts, max_tiles=48, max_dim=8):
 
 def _fetch_one(tile, layer):
     x, y, zoom = tile
+    key = (layer, zoom, x, y)
+    cached = _tile_cache_get(key)
+    if cached is not None:
+        return x, y, cached
     url = tile_url(x, y, zoom, layer)
     last = None
     for _ in range(3):
         try:
             with urlopen(url, timeout=15) as resp:
-                return x, y, resp.read()
+                data = resp.read()
+            _tile_cache_put(key, data)
+            return x, y, data
         except Exception as exc:  # noqa: BLE001
             detail = str(exc)
             rd = getattr(exc, "read", None)

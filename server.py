@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sat2pixel.coords import gcj02_to_wgs84, wgs84_to_gcj02
 from sat2pixel.http import urlopen
 from sat2pixel.mosaic import LAYERS, fetch_satellite, layer_datum, tile_url
-from sat2pixel.nav import build_nav_image
+from sat2pixel.nav import build_nav_image, effective_span_m
 from sat2pixel import pixelstyle
 from sat2pixel.navpacket import encode_indexed_packet, encode_nav_packet, rgb_to_565
 from sat2pixel.preview import downsample, encode, stats
@@ -30,7 +30,7 @@ from sat2pixel.protocol import Corner, NavRequest, SatelliteRequest, DEDUP_TTL_S
 
 AMAP_WEB_KEY = os.environ.get("AMAP_WEB_KEY", "")
 
-app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.5.0")
+app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.6.0")
 
 # (device_id, seq) -> (expires_at, body, media_type, headers)
 _CACHE: dict = {}
@@ -100,8 +100,8 @@ def _convert_to_layer(corners, src, layer):
 
 
 def _expand_square(corners):
-    """Expand a bbox to a centred square (metres) so all four corners stay in frame
-    on the square 240x240 screen."""
+    """Expand a bbox to a centred square (metres) so all four corners stay in
+    frame regardless of the requested square output size."""
     lngs = [c["lng"] for c in corners]
     lats = [c["lat"] for c in corners]
     clng = (min(lngs) + max(lngs)) / 2.0
@@ -174,7 +174,7 @@ def convert(lng: float, lat: float, src: str = "gcj02", dst: str = "wgs84"):
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.5.0"}
+    return {"status": "ok", "version": "0.6.0"}
 
 
 @app.get("/api/inputtips")
@@ -362,8 +362,9 @@ async def nav(request: Request):
         if req.sat_opacity >= 100:
             req.sat_opacity = 60
 
-    fp = (round(req.lng, 6), round(req.lat, 6), req.size_m, req.heading, req.size,
-          req.format, req.layer, req.style, req.theme, req.process,
+    span_m = effective_span_m(req.size_m, req.zoom)
+    fp = (round(req.lng, 6), round(req.lat, 6), round(span_m, 3), req.heading, req.size,
+          round(req.zoom, 3), req.format, req.layer, req.style, req.theme, req.process,
           req.sat_opacity, req.coord)
     key = ("nav", req.device_id, req.seq, fp)
     cached = _cache_get(key)
@@ -374,14 +375,14 @@ async def nav(request: Request):
     try:
         if req.layer == "satellite":
             slng, slat = _convert_lnglat(req.lng, req.lat, req.coord, "gcj02")
-            image, zoom = build_nav_image(slng, slat, req.size_m, req.size, req.heading, "satellite")
+            image, zoom = build_nav_image(slng, slat, span_m, req.size, req.heading, "satellite")
             if req.sat_opacity < 100:
                 rlng, rlat = _convert_lnglat(req.lng, req.lat, req.coord, "wgs84")
-                road_img, _ = build_nav_image(rlng, rlat, req.size_m, req.size, req.heading, "road")
+                road_img, _ = build_nav_image(rlng, rlat, span_m, req.size, req.heading, "road")
                 image = Image.blend(road_img, image, req.sat_opacity / 100.0)
         else:
             lng, lat = _convert_lnglat(req.lng, req.lat, req.coord, layer_datum(req.layer))
-            image, zoom = build_nav_image(lng, lat, req.size_m, req.size, req.heading, req.layer)
+            image, zoom = build_nav_image(lng, lat, span_m, req.size, req.heading, req.layer)
     except Exception as exc:  # noqa: BLE001
         return Response(
             content=f'{{"code":"TILE_FETCH_FAILED","message":"{exc}"}}',
@@ -411,6 +412,8 @@ async def nav(request: Request):
             "X-Nav-Width": str(w),
             "X-Nav-Height": str(h),
             "X-Nav-Zoom": str(zoom),
+            "X-Nav-Zoom-Factor": f"{req.zoom:.2f}",
+            "X-Nav-Span-M": f"{span_m:.1f}",
             "X-Nav-Palette": ",".join("#{:04X}".format(int(p)) for p in palette_hdr),
             "X-Nav-Size": str(len(body_bytes)),
             "X-Nav-Raw-Rgb565": str(w * h * 2),
@@ -423,6 +426,8 @@ async def nav(request: Request):
             "X-Nav-Width": str(w),
             "X-Nav-Height": str(h),
             "X-Nav-Zoom": str(zoom),
+            "X-Nav-Zoom-Factor": f"{req.zoom:.2f}",
+            "X-Nav-Span-M": f"{span_m:.1f}",
             "X-Nav-Size": str(len(body_bytes)),
             "X-Nav-Style": style_tag,
         }
