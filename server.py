@@ -30,7 +30,7 @@ from sat2pixel.protocol import Corner, NavRequest, SatelliteRequest, DEDUP_TTL_S
 
 AMAP_WEB_KEY = os.environ.get("AMAP_WEB_KEY", "")
 
-app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.7.0")
+app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.8.0")
 
 # (device_id, seq) -> (expires_at, body, media_type, headers)
 _CACHE: dict = {}
@@ -174,7 +174,7 @@ def convert(lng: float, lat: float, src: str = "gcj02", dst: str = "wgs84"):
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.7.0"}
+    return {"status": "ok", "version": "0.8.0"}
 
 
 @app.get("/api/inputtips")

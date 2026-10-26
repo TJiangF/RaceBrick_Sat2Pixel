@@ -15,6 +15,11 @@ _EQ_MPP_Z0 = 156543.03392
 # `size` request (e.g. 512 with 1.5x rotation oversampling).
 _MAX_FETCH_PX = 1024
 
+# Ground-width limits. 8,000 km covers the whole of China with margin at the
+# minimum zoom factor used by the device.
+MIN_SPAN_M = 20.0
+MAX_SPAN_M = 8_000_000.0
+
 
 def ground_mpp(lat, zoom):
     return _EQ_MPP_Z0 * math.cos(math.radians(lat)) / (2 ** zoom)
@@ -31,7 +36,7 @@ def effective_span_m(size_m, zoom):
     """Ground width after zoom (>1 zooms in) clamped to the API's legal range."""
     if not zoom or zoom <= 0:
         zoom = 1.0
-    return max(20.0, min(10000.0, float(size_m) / float(zoom)))
+    return max(MIN_SPAN_M, min(MAX_SPAN_M, float(size_m) / float(zoom)))
 
 
 def square_corners(cx, cy, size_m):
