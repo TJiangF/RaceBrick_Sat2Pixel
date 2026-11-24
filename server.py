@@ -27,10 +27,12 @@ from sat2pixel import pixelstyle
 from sat2pixel.navpacket import encode_indexed_packet, encode_nav_packet, rgb_to_565
 from sat2pixel.preview import downsample, encode, stats
 from sat2pixel.protocol import Corner, NavRequest, SatelliteRequest, DEDUP_TTL_S
+from racebrick_platform import router as platform_router
 
 AMAP_WEB_KEY = os.environ.get("AMAP_WEB_KEY", "")
 
 app = FastAPI(title="RaceBrick_Sat2Pixel", version="0.8.0")
+app.include_router(platform_router)
 
 # (device_id, seq) -> (expires_at, body, media_type, headers)
 _CACHE: dict = {}
@@ -444,6 +446,4 @@ async def nav(request: Request):
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-@app.get("/")
-def index():
-    return FileResponse("static/index.html")
+

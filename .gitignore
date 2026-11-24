@@ -6,3 +6,5 @@ venv/
 *.bin
 *.png
 .DS_Store
+
+data/

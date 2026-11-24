@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RaceBrick Cloud</title>
+<style>
+:root{--bg:#0b0f14;--panel:#131a23;--panel2:#0f151d;--line:#263242;--text:#e8f0f5;--muted:#8fa2b5;--accent:#66e0d2;--purple:#a78bfa;--red:#ff6b6b;--yellow:#ffd166;--green:#5ed6a3}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#15202c,#080b10 55%);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button,input,select{font:inherit}button{cursor:pointer}.hidden{display:none!important}
+.shell{max-width:1320px;margin:0 auto;padding:20px}.top{display:flex;align-items:center;gap:16px;margin-bottom:18px}.brand{font-size:22px;font-weight:800;letter-spacing:.5px}.brand span{color:var(--accent)}.grow{flex:1}.muted{color:var(--muted)}.small{font-size:12px}.panel{background:linear-gradient(145deg,rgba(25,35,47,.97),rgba(13,20,29,.98));border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+input,select{background:#0b1119;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 11px;outline:none}input:focus,select:focus{border-color:var(--accent)}button{border:1px solid transparent;border-radius:8px;padding:9px 13px;background:var(--accent);color:#071016;font-weight:700}button.secondary{background:#182332;color:var(--text);border-color:var(--line)}button.danger{background:#3a1720;color:#ffb3c0;border-color:#6b2b38}button:disabled{opacity:.45;cursor:default}
+.auth{max-width:420px;margin:8vh auto}.auth h1{margin:0 0 4px}.field{display:flex;flex-direction:column;gap:6px;margin:12px 0}.field span{color:var(--muted);font-size:12px}.row{display:flex;gap:8px;align-items:center}.wrap{flex-wrap:wrap}.divider{height:1px;background:var(--line);margin:14px 0}.error{color:#ff9bac;min-height:20px}.ok{color:var(--green)}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px}.sidebar{position:sticky;top:20px;align-self:start}.device-btn{width:100%;text-align:left;background:#101823;color:var(--text);border:1px solid var(--line);margin:5px 0;padding:10px 11px}.device-btn.active{border-color:var(--accent);background:#102329}.device-btn b{display:block}.status{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+.device-head{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}.device-head h2{margin:0}.tabs{display:flex;gap:6px;margin:12px 0}.tabs button{background:#111b26;color:var(--muted);border:1px solid var(--line)}.tabs button.active{background:var(--accent);color:#071016}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}.card{background:#101823;border:1px solid var(--line);border-radius:12px;padding:12px}.card h3{margin:0 0 4px;font-size:15px}.canvas{width:100%;height:150px;display:block;background:#0a121b;border:1px solid #1c2a37;border-radius:9px;margin:9px 0}.meta{color:var(--muted);font-size:12px}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#182535;color:var(--accent);font-size:11px;margin-right:5px}.pill.best{background:#2a1d45;color:#d7c4ff}.pill.pending{background:#3b2e13;color:var(--yellow)}
+.session-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1c2835}.session-row:last-child{border-bottom:0}.session-time{font-variant-numeric:tabular-nums;font-weight:800}.lap-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-top:8px}.lap{background:#0b1119;border:1px solid #1b2a38;border-radius:7px;padding:6px 8px;font-size:12px}.lap.best{border-color:var(--purple);background:#211936;color:#e7d7ff}.empty{padding:22px;text-align:center;color:var(--muted)}.toast{position:fixed;right:18px;bottom:18px;background:#192633;border:1px solid #355064;padding:11px 15px;border-radius:9px;opacity:0;transform:translateY(8px);transition:.2s;z-index:20}.toast.show{opacity:1;transform:none}.admin-table{width:100%;border-collapse:collapse}.admin-table td,.admin-table th{text-align:left;padding:8px;border-bottom:1px solid #1c2835}.admin-table th{color:var(--muted);font-weight:500;font-size:12px}.edit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.edit-grid label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:11px}.edit-grid input{padding:7px 9px}
+@media(max-width:800px){.layout{grid-template-columns:1fr}.sidebar{position:static}.cards{grid-template-columns:1fr}.shell{padding:12px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div class="brand">RaceBrick <span>Cloud</span></div>
+    <div class="grow"></div>
+    <div id="userBox" class="row hidden"><span id="userLabel" class="muted small"></span><button id="logoutBtn" class="secondary">退出</button></div>
+  </div>
+
+  <section id="authView" class="panel auth">
+    <h1 id="authTitle">登录 RaceBrick Cloud</h1>
+    <div class="muted small">绑定设备后，Track 和 Race Log 会自动显示在账户中。</div>
+    <div class="field"><span>用户名</span><input id="username" autocomplete="username" placeholder="用户名"></div>
+    <div class="field"><span>密码</span><input id="password" type="password" autocomplete="current-password" placeholder="至少 8 位"></div>
+    <div class="error" id="authError"></div>
+    <div class="row">
+      <button id="loginBtn">登录</button>
+      <button id="registerBtn" class="secondary">注册账户</button>
+    </div>
+  </section>
+
+  <main id="appView" class="layout hidden">
+    <aside class="sidebar panel">
+      <h3 style="margin:0 0 10px">我的设备</h3>
+      <div id="deviceList"></div>
+      <div class="divider"></div>
+      <div class="field"><span>绑定 ESP 唯一码</span><input id="bindUid" placeholder="例如 esp32s3-3051EC"></div>
+      <button id="bindBtn" class="secondary">绑定设备</button>
+      <div id="bindMsg" class="small muted" style="margin-top:8px"></div>
+      <div class="divider"></div>
+      <button id="adminBtn" class="secondary hidden">管理后台</button>
+    </aside>
+    <section id="content" class="panel"><div class="empty">选择或绑定一台 RaceBrick 设备</div></section>
+  </main>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { token: localStorage.getItem('rb_token') || '', me: null, devices: [], uid: null, tab: 'tracks', admin: false };
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg, bad=false){ const t=$('toast'); t.textContent=msg; t.style.borderColor=bad?'#6b2b38':'#355064'; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2600); }
+async function api(path, opt={}){
+  const headers = Object.assign({'Content-Type':'application/json'}, opt.headers||{});
+  if(state.token) headers.Authorization='Bearer '+state.token;
+  const r = await fetch(path, Object.assign({}, opt, {headers}));
+  const text = await r.text();
+  let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data={message:text}; }
+  if(!r.ok){ throw new Error(data.detail || data.message || ('HTTP '+r.status)); }
+  return data;
+}
+function fmtTime(s){ if(s==null||!isFinite(s)) return '--'; s=Number(s); const m=Math.floor(s/60), x=s-m*60; return m+':'+x.toFixed(3).padStart(6,'0'); }
+function fmtDate(ts){ if(!ts) return '--'; return new Date(ts*1000).toLocaleString(); }
+function fmtDuration(ms){ if(!ms) return '--'; const s=Math.round(ms/1000); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+function deviceName(d){ return d.name || d.uid; }
+function showAuth(){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('userBox').classList.add('hidden'); }
+function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('userBox').classList.remove('hidden'); $('userLabel').textContent = state.me ? (state.me.username + (state.me.role==='admin'?' · ADMIN':'')) : ''; $('adminBtn').classList.toggle('hidden', !(state.me && state.me.role==='admin')); }
+async function boot(){
+  if(!state.token) return showAuth();
+  try { state.me = (await api('/api/platform/me')).user; showApp(); await loadDevices(); }
+  catch(e){ state.token=''; localStorage.removeItem('rb_token'); showAuth(); }
+}
+async function doLogin(registerMode=false){
+  $('authError').textContent='';
+  const username=$('username').value.trim(), password=$('password').value;
+  if(!username||!password){ $('authError').textContent='请输入用户名和密码'; return; }
+  try{
+    const d = await api(registerMode?'/api/platform/register':'/api/platform/login',{method:'POST',body:JSON.stringify({username,password})});
+    state.token=d.token; localStorage.setItem('rb_token',d.token); state.me=d.user; showApp(); await loadDevices(); toast(registerMode?'账户已创建':'登录成功');
+  }catch(e){ $('authError').textContent=e.message; }
+}
+async function loadDevices(){
+  const d=await api('/api/platform/devices'); state.devices=d.devices||[];
+  const list=$('deviceList'); list.innerHTML='';
+  if(!state.devices.length){ list.innerHTML='<div class="empty small">暂无绑定设备</div>'; }
+  for(const dev of state.devices){
+    const b=document.createElement('button'); b.className='device-btn'+(state.uid===dev.uid?' active':'');
+    b.innerHTML=`<b>${esc(deviceName(dev))}</b><span class="status"><i class="dot ${dev.last_seen?'on':''}"></i>${esc(dev.uid)} · ${dev.tracks} tracks · ${dev.sessions} logs</span>`;
+    b.onclick=()=>{ state.uid=dev.uid; loadDevices(); loadDevice(dev.uid); };
+    list.appendChild(b);
+  }
+  if(!state.uid && state.devices.length){ state.uid=state.devices[0].uid; loadDevice(state.uid); }
+  if(!state.devices.length) $('content').innerHTML='<div class="empty">先在左侧绑定 ESP 设备唯一码</div>';
+}
+async function loadDevice(uid){
+  state.uid=uid; state.admin=false;
+  try{
+    const d=await api('/api/platform/devices/'+encodeURIComponent(uid));
+    renderDevice(d);
+  }catch(e){ $('content').innerHTML=`<div class="error">${esc(e.message)}</div>`; }
+}
+function canvasFor(track){
+  const c=document.createElement('canvas'); c.width=600; c.height=280; c.className='canvas';
+  const pts=track.payload?.points||[]; if(!pts.length) return c;
+  const xs=pts.map(p=>Number(p[0])), ys=pts.map(p=>Number(p[1]));
+  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  const pad=20,s=Math.min((c.width-pad*2)/Math.max(maxx-minx,1e-6),(c.height-pad*2)/Math.max(maxy-miny,1e-6));
+  const ox=(c.width-(maxx-minx)*s)/2, oy=(c.height-(maxy-miny)*s)/2;
+  const ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height);
+  ctx.strokeStyle='#66e0d2'; ctx.lineWidth=4; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.beginPath();
+  pts.forEach((p,i)=>{const x=ox+(p[0]-minx)*s,y=c.height-(oy+(p[1]-miny)*s); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.stroke();
+  const sf=Number(track.payload?.start_f||0); const idx=Math.max(0,Math.min(pts.length-1,Math.floor(sf*(pts.length-1))));
+  if(pts[idx]){const p=pts[idx],x=ox+(p[0]-minx)*s,y=c.height-(oy+(p[1]-miny)*s); ctx.fillStyle='#ff5252'; ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();}
+  return c;
+}
+function renderDevice(d){
+  const dev=d.device; const tracks=d.tracks||[], sessions=d.sessions||[], logs=d.logs||[];
+  let html=`<div class="device-head"><div class="grow"><h2>${esc(deviceName(dev))}</h2><div class="meta">${esc(dev.uid)} · ${esc(dev.board||'ESP32-S3')} · fw ${esc(dev.fw||'--')} · 最后同步 ${fmtDate(dev.last_sync_at)}</div></div><span class="pill">${dev.bound?'BOUND':'UNBOUND'}</span></div>`;
+  html+=`<div class="tabs"><button data-tab="tracks" class="${state.tab==='tracks'?'active':''}">Track (${tracks.length})</button><button data-tab="sessions" class="${state.tab==='sessions'?'active':''}">Race Log (${sessions.length})</button><button data-tab="oldlogs" class="${state.tab==='oldlogs'?'active':''}">Legacy Log (${logs.length})</button></div>`;
+  if(state.tab==='tracks'){
+    html+='<div class="cards" id="trackCards"></div>';
+    if(!tracks.length) html+='<div class="empty">设备尚未上传 Track</div>';
+  }else if(state.tab==='sessions'){
+    html+=`<div class="cards">`;
+    if(!sessions.length) html+='<div class="empty">还没有 Race Log</div>';
+    for(const s of sessions){ html+=`<div class="card"><h3>${esc(s.track_name||'Session')} <span class="pill">${s.laps}L</span></h3><div class="meta">${fmtDate(s.start_epoch)} · ${fmtDuration(s.duration_ms)}</div><div style="margin-top:8px">最快：<span class="pill best">${s.best_lap?'L'+s.best_lap+' · '+fmtTime(s.best_time):'--'}</span></div><div class="lap-list">${(s.summary?.laps||[]).map(l=>`<div class="lap ${l.lap===s.best_lap?'best':''}">L${l.lap} <b>${fmtTime(l.time)}</b>${l.lap===s.best_lap?' BEST':''}</div>`).join('')}</div></div>`; }
+    html+=`</div>`;
+  }else{
+    html+=`<div class="cards">`;
+    if(!logs.length) html+='<div class="empty">还没有旧版 Race Log</div>';
+    for(const l of logs){ html+=`<div class="card"><h3>${esc(l.track_name||'Race Log')} <span class="pill">${l.laps}L</span></h3><div class="meta">${l.best_lap?'最快 L'+l.best_lap+' · '+fmtTime(l.best_time):'无最佳圈'}</div></div>`; }
+    html+=`</div>`;
+  }
+  $('content').innerHTML=html;
+  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderDevice(d);});
+  const cards=$('trackCards');
+  if(cards) for(const t of tracks){
+    const c=document.createElement('div'); c.className='card';
+    c.innerHTML=`<h3>${esc(t.name||'Track '+t.local_id)}</h3><div class="meta">slot ${t.local_id} · ${t.payload?.length_m?Math.round(t.payload.length_m)+'m':'--'} · ${t.payload?.geo?'GPS':'local'} · rev ${t.revision}</div>`;
+    c.appendChild(canvasFor(t));
+    const btn=document.createElement('button'); btn.className='secondary'; btn.textContent='编辑起点设置';
+    btn.onclick=()=>trackEditor(c,t); c.appendChild(btn); cards.appendChild(c);
+  }
+}
+function trackEditor(card, track){
+  if(card.querySelector('.editor')) return;
+  const p=track.payload||{}; const box=document.createElement('div'); box.className='editor divider';
+  box.innerHTML=`<div class="edit-grid"><label>名称<input name="name" value="${esc(p.name||track.name||'')}"></label><label>起点位置 %<input name="start_f" type="number" step="0.1" value="${(Number(p.start_f||0)*100).toFixed(1)}"></label><label>起始线宽度 m<input name="start_width" type="number" step="0.5" value="${Number(p.start_width||p.width||5).toFixed(1)}"></label><label>偏移 m<input name="start_offset" type="number" step="0.5" value="${Number(p.start_offset||0).toFixed(1)}"></label><label>方向<select name="reverse"><option value="0" ${!p.reverse?'selected':''}>CW</option><option value="1" ${p.reverse?'selected':''}>CCW</option></select></label></div><div class="row" style="margin-top:8px"><button class="save">保存到服务器并下发设备</button><button class="secondary cancel">取消</button></div><div class="small muted" style="margin-top:6px">修改会进入设备同步队列，设备联网同步后生效。</div>`;
+  card.appendChild(box);
+  box.querySelector('.cancel').onclick=()=>box.remove();
+  box.querySelector('.save').onclick=async()=>{
+    const v=(n)=>box.querySelector(`[name="${n}"]`).value;
+    try{
+      await api(`/api/platform/devices/${encodeURIComponent(state.uid)}/tracks/${track.local_id}`,{method:'PATCH',body:JSON.stringify({name:v('name'),start_f:Number(v('start_f'))/100,start_width:Number(v('start_width')),start_offset:Number(v('start_offset')),reverse:v('reverse')==='1'})});
+      toast('已保存到服务器，等待设备同步'); state.tab='tracks'; await loadDevice(state.uid);
+    }catch(e){ toast(e.message,true); }
+  };
+}
+async function bindDevice(){
+  const uid=$('bindUid').value.trim(); if(!uid) return;
+  try{ await api('/api/platform/bind',{method:'POST',body:JSON.stringify({device_uid:uid})}); $('bindMsg').textContent='绑定请求已提交'; state.uid=uid; await loadDevices(); await loadDevice(uid); toast('设备已绑定'); }
+  catch(e){ $('bindMsg').textContent=e.message; }
+}
+async function showAdmin(){
+  state.admin=true;
+  try{
+    const u=await api('/api/platform/admin/users');
+    let html='<h2>管理后台</h2><div class="meta">所有账户与设备概览</div><div class="divider"></div><table class="admin-table"><tr><th>ID</th><th>用户</th><th>角色</th><th>设备数</th><th>创建时间</th></tr>'+u.users.map(x=>`<tr><td>${x.id}</td><td>${esc(x.username)}</td><td>${esc(x.role)}</td><td>${x.devices}</td><td>${fmtDate(x.created_at)}</td></tr>`).join('')+'</table>';
+    $('content').innerHTML=html;
+  }catch(e){ toast(e.message,true); }
+}
+$('loginBtn').onclick=()=>doLogin(false); $('registerBtn').onclick=()=>doLogin(true);
+$('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin(false);});
+$('logoutBtn').onclick=async()=>{try{await api('/api/platform/logout',{method:'POST'})}catch{} state.token='';localStorage.removeItem('rb_token');state.me=null;showAuth();};
+$('bindBtn').onclick=bindDevice; $('adminBtn').onclick=showAdmin;
+boot();
+</script>
+</body>
+</html>
