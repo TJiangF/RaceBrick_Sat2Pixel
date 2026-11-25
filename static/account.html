@@ -7,13 +7,14 @@
 <style>
 :root{--bg:#0b0f14;--panel:#131a23;--panel2:#0f151d;--line:#263242;--text:#e8f0f5;--muted:#8fa2b5;--accent:#66e0d2;--purple:#a78bfa;--red:#ff6b6b;--yellow:#ffd166;--green:#5ed6a3}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#15202c,#080b10 55%);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button,input,select{font:inherit}button{cursor:pointer}.hidden{display:none!important}
-.shell{max-width:1320px;margin:0 auto;padding:20px}.top{display:flex;align-items:center;gap:16px;margin-bottom:18px}.brand{font-size:22px;font-weight:800;letter-spacing:.5px}.brand span{color:var(--accent)}.grow{flex:1}.muted{color:var(--muted)}.small{font-size:12px}.panel{background:linear-gradient(145deg,rgba(25,35,47,.97),rgba(13,20,29,.98));border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.shell{max-width:1360px;margin:0 auto;padding:20px}.top{display:flex;align-items:center;gap:16px;margin-bottom:18px}.brand{font-size:22px;font-weight:800;letter-spacing:.5px}.brand span{color:var(--accent)}.grow{flex:1}.muted{color:var(--muted)}.small{font-size:12px}.panel{background:linear-gradient(145deg,rgba(25,35,47,.97),rgba(13,20,29,.98));border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
 input,select{background:#0b1119;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 11px;outline:none}input:focus,select:focus{border-color:var(--accent)}button{border:1px solid transparent;border-radius:8px;padding:9px 13px;background:var(--accent);color:#071016;font-weight:700}button.secondary{background:#182332;color:var(--text);border-color:var(--line)}button.danger{background:#3a1720;color:#ffb3c0;border-color:#6b2b38}button:disabled{opacity:.45;cursor:default}
 .auth{max-width:420px;margin:8vh auto}.auth h1{margin:0 0 4px}.field{display:flex;flex-direction:column;gap:6px;margin:12px 0}.field span{color:var(--muted);font-size:12px}.row{display:flex;gap:8px;align-items:center}.wrap{flex-wrap:wrap}.divider{height:1px;background:var(--line);margin:14px 0}.error{color:#ff9bac;min-height:20px}.ok{color:var(--green)}
-.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px}.sidebar{position:sticky;top:20px;align-self:start}.device-btn{width:100%;text-align:left;background:#101823;color:var(--text);border:1px solid var(--line);margin:5px 0;padding:10px 11px}.device-btn.active{border-color:var(--accent);background:#102329}.device-btn b{display:block}.status{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
-.device-head{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}.device-head h2{margin:0}.tabs{display:flex;gap:6px;margin:12px 0}.tabs button{background:#111b26;color:var(--muted);border:1px solid var(--line)}.tabs button.active{background:var(--accent);color:#071016}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}.card{background:#101823;border:1px solid var(--line);border-radius:12px;padding:12px}.card h3{margin:0 0 4px;font-size:15px}.canvas{width:100%;height:150px;display:block;background:#0a121b;border:1px solid #1c2a37;border-radius:9px;margin:9px 0}.meta{color:var(--muted);font-size:12px}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#182535;color:var(--accent);font-size:11px;margin-right:5px}.pill.best{background:#2a1d45;color:#d7c4ff}.pill.pending{background:#3b2e13;color:var(--yellow)}
-.session-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1c2835}.session-row:last-child{border-bottom:0}.session-time{font-variant-numeric:tabular-nums;font-weight:800}.lap-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-top:8px}.lap{background:#0b1119;border:1px solid #1b2a38;border-radius:7px;padding:6px 8px;font-size:12px}.lap.best{border-color:var(--purple);background:#211936;color:#e7d7ff}.empty{padding:22px;text-align:center;color:var(--muted)}.toast{position:fixed;right:18px;bottom:18px;background:#192633;border:1px solid #355064;padding:11px 15px;border-radius:9px;opacity:0;transform:translateY(8px);transition:.2s;z-index:20}.toast.show{opacity:1;transform:none}.admin-table{width:100%;border-collapse:collapse}.admin-table td,.admin-table th{text-align:left;padding:8px;border-bottom:1px solid #1c2835}.admin-table th{color:var(--muted);font-weight:500;font-size:12px}.edit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.edit-grid label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:11px}.edit-grid input{padding:7px 9px}
-@media(max-width:800px){.layout{grid-template-columns:1fr}.sidebar{position:static}.cards{grid-template-columns:1fr}.shell{padding:12px}}
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px}.sidebar{position:sticky;top:20px;align-self:start}.device-btn{width:100%;text-align:left;background:#101823;color:var(--text);border:1px solid var(--line);margin:5px 0;padding:10px 11px}.device-btn.active{border-color:var(--accent);background:#102329}.device-btn b{display:block}.status{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+.device-head{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}.device-head h2{margin:0}.tabs{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}.tabs button{background:#111b26;color:var(--muted);border:1px solid var(--line)}.tabs button.active{background:var(--accent);color:#071016}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}.card{background:#101823;border:1px solid var(--line);border-radius:12px;padding:12px}.card h3{margin:0 0 4px;font-size:15px}.card.click{cursor:pointer;transition:.15s}.card.click:hover{border-color:#3f6474;transform:translateY(-1px)}.canvas{width:100%;height:190px;display:block;background:#0a121b;border:1px solid #1c2a37;border-radius:9px;margin:9px 0}.meta{color:var(--muted);font-size:12px}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#182535;color:var(--accent);font-size:11px;margin-right:5px}.pill.best{background:#2a1d45;color:#d7c4ff}.pill.pending{background:#3b2e13;color:var(--yellow)}.pill.green{background:#123529;color:#8bf0c3}
+.sync-panel{background:#0d1620;border:1px solid #203345;border-radius:12px;padding:10px 12px;margin:0 0 12px}.sync-line{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1a2837;font-size:12px}.sync-line:last-child{border-bottom:0}.sync-line b{font-variant-numeric:tabular-nums}.session-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1c2835}.session-row:last-child{border-bottom:0}.session-time{font-variant-numeric:tabular-nums;font-weight:800}.lap-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:6px;margin-top:8px}.lap{background:#0b1119;border:1px solid #1b2a38;border-radius:7px;padding:6px 8px;font-size:12px}.lap.best{border-color:var(--purple);background:#211936;color:#e7d7ff}.empty{padding:22px;text-align:center;color:var(--muted)}.toast{position:fixed;right:18px;bottom:18px;background:#192633;border:1px solid #355064;padding:11px 15px;border-radius:9px;opacity:0;transform:translateY(8px);transition:.2s;z-index:50}.toast.show{opacity:1;transform:none}.admin-table{width:100%;border-collapse:collapse}.admin-table td,.admin-table th{text-align:left;padding:8px;border-bottom:1px solid #1c2835}.admin-table th{color:var(--muted);font-weight:500;font-size:12px}.edit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.edit-grid label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:11px}.edit-grid input{padding:7px 9px}
+.modal{position:fixed;inset:0;background:rgba(3,7,11,.78);display:flex;align-items:center;justify-content:center;padding:18px;z-index:40}.modal-card{width:min(1040px,100%);max-height:94vh;overflow:auto;background:#101823;border:1px solid #355064;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.55);padding:16px}.modal-head{display:flex;gap:12px;align-items:center;margin-bottom:8px}.modal-head h2{margin:0;font-size:20px}.map-large{width:100%;height:auto;display:block;background:#081019;border:1px solid #1c2a37;border-radius:12px}.lap-chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.lap-chips button{background:#142131;color:var(--text);border:1px solid #294055;padding:5px 9px}.lap-chips button.active{border-color:var(--accent);color:var(--accent)}.lap-chips button.best{border-color:var(--purple);color:#d7c4ff}.map-legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin:7px 0}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+@media(max-width:800px){.layout{grid-template-columns:1fr}.sidebar{position:static}.cards{grid-template-columns:1fr}.shell{padding:12px}.canvas{height:170px}}
 </style>
 </head>
 <body>
@@ -26,7 +27,7 @@ input,select{background:#0b1119;color:var(--text);border:1px solid var(--line);b
 
   <section id="authView" class="panel auth">
     <h1 id="authTitle">登录 RaceBrick Cloud</h1>
-    <div class="muted small">绑定设备后，Track 和 Race Log 会自动显示在账户中。</div>
+    <div class="muted small">绑定设备后，Track、Race Log 和最近 3 次云同步快照会显示在账户中。</div>
     <div class="field"><span>用户名</span><input id="username" autocomplete="username" placeholder="用户名"></div>
     <div class="field"><span>密码</span><input id="password" type="password" autocomplete="current-password" placeholder="至少 8 位"></div>
     <div class="error" id="authError"></div>
@@ -51,12 +52,14 @@ input,select{background:#0b1119;color:var(--text);border:1px solid var(--line);b
   </main>
 </div>
 <div id="toast" class="toast"></div>
+<div id="modal" class="modal hidden"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { token: localStorage.getItem('rb_token') || '', me: null, devices: [], uid: null, tab: 'tracks', admin: false };
+const state = { token: localStorage.getItem('rb_token') || '', me: null, devices: [], uid: null, tab: 'tracks', admin: false, data: null, history: [] };
+const LAP_COLORS = ['#66e0d2','#ffd166','#ff8f6b','#8ecae6','#b5e48c','#f4a6d7','#c9b6ff','#f6bd60'];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(msg, bad=false){ const t=$('toast'); t.textContent=msg; t.style.borderColor=bad?'#6b2b38':'#355064'; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2600); }
+function toast(msg, bad=false){ const t=$('toast'); t.textContent=msg; t.style.borderColor=bad?'#6b2b38':'#355064'; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2800); }
 async function api(path, opt={}){
   const headers = Object.assign({'Content-Type':'application/json'}, opt.headers||{});
   if(state.token) headers.Authorization='Bearer '+state.token;
@@ -69,8 +72,9 @@ async function api(path, opt={}){
 function fmtTime(s){ if(s==null||!isFinite(s)) return '--'; s=Number(s); const m=Math.floor(s/60), x=s-m*60; return m+':'+x.toFixed(3).padStart(6,'0'); }
 function fmtDate(ts){ if(!ts) return '--'; return new Date(ts*1000).toLocaleString(); }
 function fmtDuration(ms){ if(!ms) return '--'; const s=Math.round(ms/1000); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+function fmtBytes(n){ n=Number(n||0); if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(2)+' MB'; }
 function deviceName(d){ return d.name || d.uid; }
-function showAuth(){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('userBox').classList.add('hidden'); }
+function showAuth(){ closeModal(); $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('userBox').classList.add('hidden'); }
 function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('userBox').classList.remove('hidden'); $('userLabel').textContent = state.me ? (state.me.username + (state.me.role==='admin'?' · ADMIN':'')) : ''; $('adminBtn').classList.toggle('hidden', !(state.me && state.me.role==='admin')); }
 async function boot(){
   if(!state.token) return showAuth();
@@ -102,28 +106,119 @@ async function loadDevices(){
 async function loadDevice(uid){
   state.uid=uid; state.admin=false;
   try{
-    const d=await api('/api/platform/devices/'+encodeURIComponent(uid));
-    renderDevice(d);
+    const [d,h]=await Promise.all([
+      api('/api/platform/devices/'+encodeURIComponent(uid)),
+      api('/api/platform/devices/'+encodeURIComponent(uid)+'/sync-history').catch(()=>({history:[]}))
+    ]);
+    state.data=d; state.history=h.history||[]; renderDevice(d);
   }catch(e){ $('content').innerHTML=`<div class="error">${esc(e.message)}</div>`; }
 }
-function canvasFor(track){
-  const c=document.createElement('canvas'); c.width=600; c.height=280; c.className='canvas';
-  const pts=track.payload?.points||[]; if(!pts.length) return c;
-  const xs=pts.map(p=>Number(p[0])), ys=pts.map(p=>Number(p[1]));
-  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
-  const pad=20,s=Math.min((c.width-pad*2)/Math.max(maxx-minx,1e-6),(c.height-pad*2)/Math.max(maxy-miny,1e-6));
-  const ox=(c.width-(maxx-minx)*s)/2, oy=(c.height-(maxy-miny)*s)/2;
-  const ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height);
-  ctx.strokeStyle='#66e0d2'; ctx.lineWidth=4; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.beginPath();
-  pts.forEach((p,i)=>{const x=ox+(p[0]-minx)*s,y=c.height-(oy+(p[1]-miny)*s); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-  ctx.stroke();
-  const sf=Number(track.payload?.start_f||0); const idx=Math.max(0,Math.min(pts.length-1,Math.floor(sf*(pts.length-1))));
-  if(pts[idx]){const p=pts[idx],x=ox+(p[0]-minx)*s,y=c.height-(oy+(p[1]-miny)*s); ctx.fillStyle='#ff5252'; ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();}
+function fit(canvas, series, pad=26){
+  let pts=[]; series.forEach(s=>pts=pts.concat(s));
+  if(!pts.length) return null;
+  const xs=pts.map(p=>+p[0]), ys=pts.map(p=>+p[1]);
+  let minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  if(maxx-minx<1e-6){minx-=.5;maxx+=.5;} if(maxy-miny<1e-6){miny-=.5;maxy+=.5;}
+  const s=Math.min((canvas.width-pad*2)/(maxx-minx),(canvas.height-pad*2)/(maxy-miny));
+  const ox=(canvas.width-(maxx-minx)*s)/2, oy=(canvas.height-(maxy-miny)*s)/2;
+  return {s,ox,oy,minx,miny,px:p=>[ox+(p[0]-minx)*s,canvas.height-(oy+(p[1]-miny)*s)]};
+}
+function grid(ctx,c){
+  ctx.fillStyle='#08111a'; ctx.fillRect(0,0,c.width,c.height);
+  ctx.strokeStyle='#12202c'; ctx.lineWidth=1;
+  for(let x=0;x<c.width;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke();}
+  for(let y=0;y<c.height;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke();}
+}
+function trackPoints(track){ return (track.payload?.points||[]).filter(p=>Array.isArray(p)&&p.length>=2); }
+function geoToNorm(track, lat, lon){
+  const p=track.payload||{}; if(!p.geo||!p.nscale) return null;
+  const lat0=+p.glat0||0, lon0=+p.glon0||0, ns=+p.nscale||0;
+  const mx=(lon-lon0)*111320*Math.cos((lat+lat0)*Math.PI/360);
+  const my=(lat-lat0)*111320;
+  return [mx*ns+(+p.nox||0), my*ns+(+p.noy||0)];
+}
+function drawTrack(track, tall=false){
+  const c=document.createElement('canvas'); c.width=800; c.height=tall?420:300; c.className='canvas';
+  const ctx=c.getContext('2d'); grid(ctx,c);
+  const pts=trackPoints(track); if(!pts.length) return c;
+  const f=fit(c,[pts]); const p=track.payload||{};
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='#071218'; ctx.lineWidth=13; ctx.beginPath();
+  pts.forEach((q,i)=>{const [x,y]=f.px(q); i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke();
+  ctx.strokeStyle='#66e0d2'; ctx.lineWidth=5; ctx.beginPath();
+  pts.forEach((q,i)=>{const [x,y]=f.px(q); i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke();
+  const sf=Math.max(0,Math.min(1,+p.start_f||0));
+  const idx=Math.max(0,Math.min(pts.length-1,Math.floor(sf*(pts.length-1))));
+  const q=pts[idx], prev=pts[Math.max(0,idx-3)], next=pts[Math.min(pts.length-1,idx+3)];
+  const center=f.px(q), a=f.px(prev), b=f.px(next);
+  let dx=b[0]-a[0], dy=b[1]-a[1]; const dl=Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
+  const widthPx=Math.max(12, Math.min(70, (+p.start_width||5)*(+p.nscale||1)*f.s));
+  const nx=-dy, ny=dx;
+  ctx.strokeStyle='#f4f4f5'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(center[0]-nx*widthPx/2,center[1]-ny*widthPx/2); ctx.lineTo(center[0]+nx*widthPx/2,center[1]+ny*widthPx/2); ctx.stroke();
+  ctx.strokeStyle='#111'; ctx.lineWidth=4; ctx.setLineDash([5,5]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='#ff5252'; ctx.beginPath(); ctx.arc(center[0],center[1],7,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#ffd166'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(center[0],center[1]);
+  const dir=(p.reverse? -1:1); ctx.lineTo(center[0]+dx*34*dir,center[1]+dy*34*dir); ctx.stroke();
+  ctx.fillStyle='#8fa2b5'; ctx.font='16px -apple-system,BlinkMacSystemFont,sans-serif';
+  ctx.fillText((track.name||('Track '+track.local_id))+'  ·  start '+(sf*100).toFixed(1)+'%',22,28);
   return c;
+}
+function speedColor(kmh,max){
+  const t=Math.max(0,Math.min(1,(Number(kmh)||0)/Math.max(1,max)));
+  if(t<.5) return `hsl(${140+t*60},85%,58%)`;
+  return `hsl(${80-(t-.5)*115},92%,60%)`;
+}
+function drawLapHeat(ctx,f,pts,max){
+  ctx.lineWidth=6; ctx.lineCap='round';
+  for(let i=1;i<pts.length;i++){
+    const p=pts[i-1],q=pts[i]; const [x1,y1]=f.px(p),[x2,y2]=f.px(q);
+    ctx.strokeStyle=speedColor(q[2],max); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  }
+}
+function drawSession(session, selectedLap=null){
+  const c=document.createElement('canvas'); c.width=900; c.height=460; c.className='map-large';
+  const ctx=c.getContext('2d'); grid(ctx,c);
+  const laps=session.summary?.laps||[];
+  const series=laps.map(l=>(l.points||[]).filter(p=>Array.isArray(p)&&p.length>=2));
+  const f=fit(c,series,32); if(!f) return c;
+  const maxSpeed=Math.max(1,...series.flat().map(p=>+p[2]||0));
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  laps.forEach((lap,i)=>{
+    const pts=series[i]; if(pts.length<2) return;
+    const best=lap.lap===session.best_lap;
+    const selected=lap.lap===selectedLap;
+    if(!selected){
+      ctx.strokeStyle=best?'#a78bfa':LAP_COLORS[(lap.lap-1)%LAP_COLORS.length];
+      ctx.globalAlpha=best?.95:.42; ctx.lineWidth=best?5:3;
+      ctx.beginPath(); pts.forEach((q,j)=>{const [x,y]=f.px(q);j?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+  });
+  if(selectedLap){
+    const pts=series[selectedLap-1];
+    drawLapHeat(ctx,f,pts,maxSpeed);
+    if(pts.length){ const s=f.px(pts[0]); ctx.fillStyle='#66e0d2'; ctx.beginPath();ctx.arc(s[0],s[1],7,0,Math.PI*2);ctx.fill(); }
+  }
+  ctx.fillStyle='#e8f0f5'; ctx.font='bold 18px -apple-system,BlinkMacSystemFont,sans-serif';
+  ctx.fillText(session.track_name||'Race session',24,30);
+  ctx.fillStyle='#8fa2b5'; ctx.font='13px -apple-system,BlinkMacSystemFont,sans-serif';
+  ctx.fillText(`${laps.length} laps · best ${session.best_lap?('L'+session.best_lap+' '+fmtTime(session.best_time)):'--'}${selectedLap?(' · showing L'+selectedLap):''}`,24,52);
+  return c;
+}
+function syncPanel(){
+  if(!state.history.length) return '<div class="sync-panel"><div class="meta">云端还没有同步快照。设备联网同步后会在这里保留最近 3 次。</div></div>';
+  let h='<div class="sync-panel"><div class="row"><b>云端同步快照</b><span class="pill green">LAST 3</span></div>';
+  for(const s of state.history){
+    h+=`<div class="sync-line"><span>${fmtDate(s.created_at)}<br><span class="muted">rev ${s.revision} · ${s.track_count} tracks · ${s.session_count} sessions · ${s.log_count} logs</span></span><span class="row"><b>${fmtBytes(s.upload_bytes)}</b><button class="secondary snap" data-id="${s.id}">下载</button></span></div>`;
+  }
+  return h+'</div>';
 }
 function renderDevice(d){
   const dev=d.device; const tracks=d.tracks||[], sessions=d.sessions||[], logs=d.logs||[];
+  state.data=d;
   let html=`<div class="device-head"><div class="grow"><h2>${esc(deviceName(dev))}</h2><div class="meta">${esc(dev.uid)} · ${esc(dev.board||'ESP32-S3')} · fw ${esc(dev.fw||'--')} · 最后同步 ${fmtDate(dev.last_sync_at)}</div></div><span class="pill">${dev.bound?'BOUND':'UNBOUND'}</span></div>`;
+  html+=syncPanel();
   html+=`<div class="tabs"><button data-tab="tracks" class="${state.tab==='tracks'?'active':''}">Track (${tracks.length})</button><button data-tab="sessions" class="${state.tab==='sessions'?'active':''}">Race Log (${sessions.length})</button><button data-tab="oldlogs" class="${state.tab==='oldlogs'?'active':''}">Legacy Log (${logs.length})</button></div>`;
   if(state.tab==='tracks'){
     html+='<div class="cards" id="trackCards"></div>';
@@ -131,24 +226,55 @@ function renderDevice(d){
   }else if(state.tab==='sessions'){
     html+=`<div class="cards">`;
     if(!sessions.length) html+='<div class="empty">还没有 Race Log</div>';
-    for(const s of sessions){ html+=`<div class="card"><h3>${esc(s.track_name||'Session')} <span class="pill">${s.laps}L</span></h3><div class="meta">${fmtDate(s.start_epoch)} · ${fmtDuration(s.duration_ms)}</div><div style="margin-top:8px">最快：<span class="pill best">${s.best_lap?'L'+s.best_lap+' · '+fmtTime(s.best_time):'--'}</span></div><div class="lap-list">${(s.summary?.laps||[]).map(l=>`<div class="lap ${l.lap===s.best_lap?'best':''}">L${l.lap} <b>${fmtTime(l.time)}</b>${l.lap===s.best_lap?' BEST':''}</div>`).join('')}</div></div>`; }
+    for(const s of sessions){
+      html+=`<div class="card click" data-session="${s.local_slot}"><h3>${esc(s.track_name||'Session')} <span class="pill">${s.laps}L</span>${s.best_lap?`<span class="pill best">BEST L${s.best_lap}</span>`:''}</h3><div class="meta">${fmtDate(s.start_epoch)} · ${fmtDuration(s.duration_ms)} · slot ${s.local_slot}</div><div class="meta" style="margin-top:6px">点击查看轨迹、每圈速度与圈速</div><div class="lap-list">${(s.summary?.laps||[]).map(l=>`<div class="lap ${l.lap===s.best_lap?'best':''}">L${l.lap} <b>${fmtTime(l.time)}</b>${l.lap===s.best_lap?' BEST':''}</div>`).join('')}</div></div>`;
+    }
     html+=`</div>`;
   }else{
     html+=`<div class="cards">`;
     if(!logs.length) html+='<div class="empty">还没有旧版 Race Log</div>';
-    for(const l of logs){ html+=`<div class="card"><h3>${esc(l.track_name||'Race Log')} <span class="pill">${l.laps}L</span></h3><div class="meta">${l.best_lap?'最快 L'+l.best_lap+' · '+fmtTime(l.best_time):'无最佳圈'}</div></div>`; }
+    for(const l of logs){ html+=`<div class="card"><h3>${esc(l.track_name||'Race Log')} <span class="pill">${l.laps}L</span></h3><div class="meta">${fmtDate(l.updated_at)} · ${l.best_lap?'最快 L'+l.best_lap+' · '+fmtTime(l.best_time):'无最佳圈'}</div></div>`; }
     html+=`</div>`;
   }
   $('content').innerHTML=html;
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderDevice(d);});
+  document.querySelectorAll('[data-session]').forEach(el=>el.onclick=()=>{
+    const s=sessions.find(x=>String(x.local_slot)===el.dataset.session); if(s) openSession(s);
+  });
+  document.querySelectorAll('.snap').forEach(el=>el.onclick=async()=>{
+    try{
+      const snap=await api(`/api/platform/devices/${encodeURIComponent(state.uid)}/sync-history/${el.dataset.id}`);
+      const blob=new Blob([JSON.stringify(snap,null,2)],{type:'application/json'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download=`racebrick-${state.uid}-sync-${el.dataset.id}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    }catch(e){ toast(e.message,true); }
+  });
   const cards=$('trackCards');
   if(cards) for(const t of tracks){
     const c=document.createElement('div'); c.className='card';
     c.innerHTML=`<h3>${esc(t.name||'Track '+t.local_id)}</h3><div class="meta">slot ${t.local_id} · ${t.payload?.length_m?Math.round(t.payload.length_m)+'m':'--'} · ${t.payload?.geo?'GPS':'local'} · rev ${t.revision}</div>`;
-    c.appendChild(canvasFor(t));
+    c.appendChild(drawTrack(t));
     const btn=document.createElement('button'); btn.className='secondary'; btn.textContent='编辑起点设置';
     btn.onclick=()=>trackEditor(c,t); c.appendChild(btn); cards.appendChild(c);
   }
+}
+function closeModal(){ $('modal').classList.add('hidden'); $('modal').innerHTML=''; }
+function openSession(session){
+  const laps=session.summary?.laps||[]; let selected=session.best_lap||laps[0]?.lap||null;
+  $('modal').classList.remove('hidden');
+  function paint(){
+    const canvas=drawSession(session,selected);
+    $('modal').innerHTML=`<div class="modal-card"><div class="modal-head"><div class="grow"><h2>${esc(session.track_name||'Session')}</h2><div class="meta">${fmtDate(session.start_epoch)} · ${fmtDuration(session.duration_ms)} · slot ${session.local_slot}</div></div><button class="secondary" id="closeModal">关闭</button></div><div id="mapHost"></div><div class="map-legend"><span><i class="legend-dot" style="background:#a78bfa"></i>best lap</span><span><i class="legend-dot" style="background:#5ed6a3"></i>slow</span><span><i class="legend-dot" style="background:#ff6b6b"></i>fast</span><span>selected lap colored by speed</span></div><div class="lap-chips" id="lapChips"></div><div class="lap-list" id="lapStats"></div></div>`;
+    $('mapHost').appendChild(canvas);
+    const chips=$('lapChips');
+    laps.forEach(l=>{
+      const b=document.createElement('button'); b.textContent=`L${l.lap} ${fmtTime(l.time)}`; b.className=(l.lap===selected?'active ':'')+(l.lap===session.best_lap?'best':'');
+      b.onclick=()=>{selected=l.lap;paint();}; chips.appendChild(b);
+    });
+    $('lapStats').innerHTML=laps.map(l=>`<div class="lap ${l.lap===session.best_lap?'best':''}">L${l.lap} <b>${fmtTime(l.time)}</b><br><span class="muted">${l.avg_kmh??'--'} avg · ${l.max_kmh??'--'} max · ${l.distance_m??'--'}m</span></div>`).join('');
+    $('closeModal').onclick=closeModal;
+  }
+  paint();
 }
 function trackEditor(card, track){
   if(card.querySelector('.editor')) return;
@@ -181,6 +307,7 @@ $('loginBtn').onclick=()=>doLogin(false); $('registerBtn').onclick=()=>doLogin(t
 $('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin(false);});
 $('logoutBtn').onclick=async()=>{try{await api('/api/platform/logout',{method:'POST'})}catch{} state.token='';localStorage.removeItem('rb_token');state.me=null;showAuth();};
 $('bindBtn').onclick=bindDevice; $('adminBtn').onclick=showAdmin;
+$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal();});
 boot();
 </script>
 </body>

@@ -19,11 +19,12 @@ import re
 import secrets
 import sqlite3
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent
@@ -178,10 +179,22 @@ def _init_db() -> None:
                 ack_at INTEGER,
                 result TEXT
             );
+            CREATE TABLE IF NOT EXISTS sync_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_uid TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                upload_bytes INTEGER NOT NULL,
+                track_count INTEGER NOT NULL,
+                session_count INTEGER NOT NULL,
+                log_count INTEGER NOT NULL,
+                payload BLOB NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_tracks_dev_rev ON tracks(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_sessions_dev_rev ON sessions(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_logs_dev_rev ON race_logs(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_commands_dev ON commands(device_uid, status);
+            CREATE INDEX IF NOT EXISTS idx_sync_history_dev ON sync_history(device_uid, id);
             CREATE INDEX IF NOT EXISTS idx_tokens_exp ON auth_tokens(expires_at);
             """
         )
@@ -290,6 +303,7 @@ class SessionPayload(BaseModel):
     hash: str | None = None
     payload: dict | None = None
     csv: str | None = None
+    csv_b64: str | None = None
     deleted: bool = False
 
 
@@ -516,6 +530,11 @@ def _process_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) -
 
 
 def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) -> tuple[bool, str | None]:
+    if item.csv is None and item.csv_b64:
+        try:
+            item.csv = base64.b64decode(item.csv_b64).decode("utf-8")
+        except Exception:
+            item.csv = None
     existing = conn.execute(
         "SELECT * FROM sessions WHERE device_uid=? AND local_slot=?", (uid, item.local_slot)
     ).fetchone()
@@ -786,6 +805,38 @@ def device_detail(uid: str, user: dict = Depends(current_user)):
         }
 
 
+@router.get("/api/platform/devices/{uid}/sync-history")
+def sync_history(uid: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        _owned_device(conn, uid, user)
+        rows = conn.execute(
+            """SELECT id,created_at,revision,upload_bytes,track_count,
+                      session_count,log_count FROM sync_history
+               WHERE device_uid=? ORDER BY id DESC LIMIT 3""",
+            (uid,),
+        ).fetchall()
+        return {"history": [dict(r) for r in rows]}
+
+
+@router.get("/api/platform/devices/{uid}/sync-history/{history_id}")
+def sync_history_detail(uid: str, history_id: int, user: dict = Depends(current_user)):
+    with db() as conn:
+        _owned_device(conn, uid, user)
+        row = conn.execute(
+            "SELECT * FROM sync_history WHERE id=? AND device_uid=?",
+            (history_id, uid),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "sync history not found")
+        try:
+            snapshot = json.loads(zlib.decompress(row["payload"]))
+        except Exception:
+            snapshot = {"error": "snapshot decode failed"}
+        return {"id": row["id"], "created_at": row["created_at"],
+                "revision": row["revision"], "upload_bytes": row["upload_bytes"],
+                "snapshot": snapshot}
+
+
 @router.patch("/api/platform/devices/{uid}/tracks/{local_id}")
 def edit_track(uid: str, local_id: int, body: TrackEditBody, user: dict = Depends(current_user)):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -875,10 +926,16 @@ def device_register(body: DeviceRegisterBody):
 
 
 @router.post("/api/device/v1/sync")
-def device_sync(body: SyncBody):
+async def device_sync(request: Request):
+    raw = await request.body()
+    try:
+        body = SyncBody.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(422, f"invalid sync body: {exc}")
     uid = body.device_uid.strip()
     if not DEVICE_RE.match(uid):
         raise HTTPException(400, "invalid device uid")
+    nodata = request.query_params.get("nodata") == "1"
     with db() as conn:
         dev = _get_device(conn, uid)
         if dev is None:
@@ -948,20 +1005,103 @@ def device_sync(body: SyncBody):
             "SELECT * FROM commands WHERE device_uid=? AND status='pending' ORDER BY id",
             (uid,),
         ).fetchall()
+        snapshot = body.model_dump()
+        snapshot["device_secret"] = "redacted"
+        clean = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode()
+        conn.execute(
+            """INSERT INTO sync_history(device_uid,created_at,revision,upload_bytes,
+               track_count,session_count,log_count,payload)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (uid, now, rev, len(raw), len(body.tracks), len(body.sessions),
+             len(body.logs), zlib.compress(clean, 6)),
+        )
+        keep = conn.execute(
+            "SELECT id FROM sync_history WHERE device_uid=? ORDER BY id DESC LIMIT 3",
+            (uid,),
+        ).fetchall()
+        ids = ",".join(str(r["id"]) for r in keep)
+        if ids:
+            conn.execute(
+                f"DELETE FROM sync_history WHERE device_uid=? AND id NOT IN ({ids})",
+                (uid,),
+            )
         return {
             "ok": True,
             "server_time": now,
             "synced_at": now,
             "revision": rev,
             "changed": changed,
-            "tracks": [_track_view(r) for r in tracks],
-            "sessions": [_session_view(r) for r in sessions],
-            "logs": [_log_view(r) for r in logs],
-            "commands": [dict(r) for r in commands],
+            "tracks": [] if nodata else [_track_view(r) for r in tracks],
+            "sessions": [] if nodata else [_session_view(r) for r in sessions],
+            "logs": [] if nodata else [_log_view(r) for r in logs],
+            "commands": [] if nodata else [dict(r) for r in commands],
             "need_tracks": need_tracks,
             "need_sessions": need_sessions,
             "need_logs": need_logs,
         }
+
+
+# ---------------------------------------------------------------------------
+# firmware-friendly device command queue
+# ---------------------------------------------------------------------------
+
+def _verify_device(conn: sqlite3.Connection, uid: str, secret: str) -> sqlite3.Row:
+    dev = _get_device(conn, uid.strip())
+    if not dev or not dev["secret_hash"] or dev["secret_hash"] != _hash_secret(secret):
+        raise HTTPException(401, "device auth failed")
+    return dev
+
+
+@router.get("/api/device/v1/commands")
+def device_commands(uid: str, secret: str | None = None,
+                    x_device_secret: str | None = Header(None)):
+    secret = secret or x_device_secret or ""
+    with db() as conn:
+        _verify_device(conn, uid, secret)
+        rows = conn.execute(
+            "SELECT * FROM commands WHERE device_uid=? AND status='pending' ORDER BY id",
+            (uid,),
+        ).fetchall()
+        lines = []
+        for row in rows:
+            if row["kind"] != "track_update":
+                continue
+            try:
+                p = json.loads(row["payload"])
+                f = p.get("fields", {})
+                local_id = int(p.get("track_local_id", -1))
+                tr = conn.execute(
+                    "SELECT payload FROM tracks WHERE device_uid=? AND local_id=? AND deleted=0",
+                    (uid, local_id),
+                ).fetchone()
+                base = json.loads(tr["payload"]) if tr else {}
+                name = str(f.get("name", base.get("name", "")))[:48]
+                name_b64 = base64.b64encode(name.encode("utf-8")).decode("ascii")
+                lines.append("%d|%d|%.5f|%.2f|%.2f|%d|%s" % (
+                    int(row["id"]), local_id,
+                    float(f.get("start_f", base.get("start_f", 0))),
+                    float(f.get("start_width", base.get("start_width", base.get("width", 0)))),
+                    float(f.get("start_offset", base.get("start_offset", 0))),
+                    1 if f.get("reverse", base.get("reverse", False)) else 0,
+                    name_b64,
+                ))
+            except Exception:
+                continue
+        return Response("\n".join(lines) + ("\n" if lines else ""),
+                        media_type="text/plain")
+
+
+@router.post("/api/device/v1/ack")
+def device_ack(uid: str, id: int, secret: str | None = None,
+               x_device_secret: str | None = Header(None)):
+    secret = secret or x_device_secret or ""
+    with db() as conn:
+        _verify_device(conn, uid, secret)
+        conn.execute(
+            "UPDATE commands SET status='acked',ack_at=? WHERE id=? AND device_uid=?",
+            (_now(), id, uid),
+        )
+        return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
