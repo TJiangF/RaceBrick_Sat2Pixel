@@ -9,17 +9,43 @@ Base URL: `https://racebrick.tfworks.cn`
   Race Logs and legacy Race Log summaries.
 - Track maps render start line/width/direction. Race Logs open a lap map with
   speed-coloured selected laps, best-lap highlight and per-lap statistics.
-- The device page shows the three most recent cloud snapshots with upload size
+- The device page shows the five most recent cloud snapshots with upload size
   and a downloadable JSON copy.
 - Admin account is seeded by `RACEBRICK_ADMIN_USER` / `RACEBRICK_ADMIN_PASSWORD`
   (defaults: `admin` / `RaceBrickAdmin#2026`).
 
-## Device provisioning and sync
+## Phone relay sync
 
-The server keeps one SQLite database at `data/racebrick.db`.
+The normal data path is now Android phone -> cloud. The ESP does not talk to
+the platform directly. The phone discovers the ESP on the phone hotspot, pulls
+the local Track/Session/Log files, and uploads a full snapshot with the account
+token:
+
+```
+GET  /api/phone/v1/devices/{uid}/state
+GET  /api/phone/v1/devices/{uid}/changes?since=<revision>
+POST /api/phone/v1/devices/{uid}/sync
+GET  /api/phone/v1/devices/{uid}/history
+```
+
+`POST /sync` is authenticated with `Authorization: Bearer <token>` and accepts
+tracks, sessions and logs. `replace: true` marks cloud records that are absent
+from the phone snapshot as deleted. Sessions may carry `csv_gzip_b64`; the
+server decompresses it before parsing. Each successful phone sync stores a
+compressed full snapshot and keeps the newest five per device. Cloud Track edits
+are returned by `/changes` so the phone can write them back to the ESP before
+uploading its next snapshot.
+
+The firmware exposes its UID at `GET /api/status` and answers UDP discovery on
+port `4210` for `RACEBRICK_DISCOVER`. Direct firmware-to-cloud sync is retired.
+
+## Legacy device provisioning (disabled)
+
+Direct device sync endpoints remain in the codebase for migration, but return
+HTTP 410 unless `RACEBRICK_ALLOW_DIRECT_DEVICE=1`.
 
 Device identity is the ESP MAC-derived UID, e.g. `esp32s3-3051EC`. The firmware
-must persist a random device secret in NVS and call:
+previously persisted a random device secret in NVS and called:
 
 ```
 POST /api/device/v1/register
@@ -46,7 +72,7 @@ POST /api/device/v1/sync
 - `?nodata=1` on the sync URL commits data but omits echoes of tracks,
   sessions and logs; commands remain available through the dedicated endpoint.
 - Every successful sync is stored as a compressed snapshot. The server keeps
-  only the newest three snapshots per device; the account page can download them.
+  only the newest five snapshots per device; the account page can download them.
 - Only after HTTP 200 may the device persist the returned `revision`/`synced_at`.
 - A sync body is committed as one transaction; an interrupted upload never
   advances the revision.
@@ -79,7 +105,7 @@ All account APIs use `Authorization: Bearer <token>`.
 | GET | `/api/platform/devices` | bound devices |
 | POST | `/api/platform/bind` | bind by device UID |
 | GET | `/api/platform/devices/{uid}` | tracks/sessions/logs/pending commands |
-| GET | `/api/platform/devices/{uid}/sync-history` | newest three sync snapshots |
+| GET | `/api/platform/devices/{uid}/sync-history` | newest five sync snapshots |
 | GET | `/api/platform/devices/{uid}/sync-history/{id}` | snapshot JSON |
 | PATCH | `/api/platform/devices/{uid}/tracks/{local_id}` | update settings and queue device command |
 | GET | `/api/platform/admin/users` | admin only |

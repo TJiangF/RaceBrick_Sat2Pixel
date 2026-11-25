@@ -27,7 +27,7 @@ input,select{background:#0b1119;color:var(--text);border:1px solid var(--line);b
 
   <section id="authView" class="panel auth">
     <h1 id="authTitle">登录 RaceBrick Cloud</h1>
-    <div class="muted small">绑定设备后，Track、Race Log 和最近 3 次云同步快照会显示在账户中。</div>
+    <div class="muted small">绑定设备后，Track、Race Log 和最近 5 次云同步快照会显示在账户中。</div>
     <div class="field"><span>用户名</span><input id="username" autocomplete="username" placeholder="用户名"></div>
     <div class="field"><span>密码</span><input id="password" type="password" autocomplete="current-password" placeholder="至少 8 位"></div>
     <div class="error" id="authError"></div>
@@ -207,8 +207,8 @@ function drawSession(session, selectedLap=null){
   return c;
 }
 function syncPanel(){
-  if(!state.history.length) return '<div class="sync-panel"><div class="meta">云端还没有同步快照。设备联网同步后会在这里保留最近 3 次。</div></div>';
-  let h='<div class="sync-panel"><div class="row"><b>云端同步快照</b><span class="pill green">LAST 3</span></div>';
+  if(!state.history.length) return '<div class="sync-panel"><div class="meta">云端还没有同步快照。设备联网同步后会在这里保留最近 5 次。</div></div>';
+  let h='<div class="sync-panel"><div class="row"><b>云端同步快照（最近 5 次）</b><span class="pill green">LAST 5</span></div>';
   for(const s of state.history){
     h+=`<div class="sync-line"><span>${fmtDate(s.created_at)}<br><span class="muted">rev ${s.revision} · ${s.track_count} tracks · ${s.session_count} sessions · ${s.log_count} logs</span></span><span class="row"><b>${fmtBytes(s.upload_bytes)}</b><button class="secondary snap" data-id="${s.id}">下载</button></span></div>`;
   }
@@ -279,14 +279,14 @@ function openSession(session){
 function trackEditor(card, track){
   if(card.querySelector('.editor')) return;
   const p=track.payload||{}; const box=document.createElement('div'); box.className='editor divider';
-  box.innerHTML=`<div class="edit-grid"><label>名称<input name="name" value="${esc(p.name||track.name||'')}"></label><label>起点位置 %<input name="start_f" type="number" step="0.1" value="${(Number(p.start_f||0)*100).toFixed(1)}"></label><label>起始线宽度 m<input name="start_width" type="number" step="0.5" value="${Number(p.start_width||p.width||5).toFixed(1)}"></label><label>偏移 m<input name="start_offset" type="number" step="0.5" value="${Number(p.start_offset||0).toFixed(1)}"></label><label>方向<select name="reverse"><option value="0" ${!p.reverse?'selected':''}>CW</option><option value="1" ${p.reverse?'selected':''}>CCW</option></select></label></div><div class="row" style="margin-top:8px"><button class="save">保存到服务器并下发设备</button><button class="secondary cancel">取消</button></div><div class="small muted" style="margin-top:6px">修改会进入设备同步队列，设备联网同步后生效。</div>`;
+  box.innerHTML=`<div class="edit-grid"><label>名称<input name="name" value="${esc(p.name||track.name||'')}"></label><label>起点位置 %<input name="start_f" type="number" step="0.1" value="${(Number(p.start_f||0)*100).toFixed(1)}"></label><label>起始线宽度 m<input name="start_width" type="number" step="0.5" value="${Number(p.start_width||p.width||5).toFixed(1)}"></label><label>偏移 m<input name="start_offset" type="number" step="0.5" value="${Number(p.start_offset||0).toFixed(1)}"></label><label>方向<select name="reverse"><option value="0" ${!p.reverse?'selected':''}>CW</option><option value="1" ${p.reverse?'selected':''}>CCW</option></select></label></div><div class="row" style="margin-top:8px"><button class="save">保存到云端，手机同步后写回设备</button><button class="secondary cancel">取消</button></div><div class="small muted" style="margin-top:6px">修改会保存到云端；手机连接设备后同步时写回设备。</div>`;
   card.appendChild(box);
   box.querySelector('.cancel').onclick=()=>box.remove();
   box.querySelector('.save').onclick=async()=>{
     const v=(n)=>box.querySelector(`[name="${n}"]`).value;
     try{
       await api(`/api/platform/devices/${encodeURIComponent(state.uid)}/tracks/${track.local_id}`,{method:'PATCH',body:JSON.stringify({name:v('name'),start_f:Number(v('start_f'))/100,start_width:Number(v('start_width')),start_offset:Number(v('start_offset')),reverse:v('reverse')==='1'})});
-      toast('已保存到服务器，等待设备同步'); state.tab='tracks'; await loadDevice(state.uid);
+      toast('已保存到云端，等待手机同步'); state.tab='tracks'; await loadDevice(state.uid);
     }catch(e){ toast(e.message,true); }
   };
 }

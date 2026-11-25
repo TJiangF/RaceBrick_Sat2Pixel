@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import gzip
 import hashlib
 import hmac
 import io
@@ -32,6 +33,7 @@ DB_PATH = Path(os.environ.get("RACEBRICK_DB", ROOT / "data" / "racebrick.db"))
 ADMIN_USER = os.environ.get("RACEBRICK_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("RACEBRICK_ADMIN_PASSWORD", "RaceBrickAdmin#2026")
 TOKEN_TTL = 60 * 60 * 24 * 30
+ALLOW_DIRECT_DEVICE = os.getenv("RACEBRICK_ALLOW_DIRECT_DEVICE", "0") == "1"
 DEVICE_RE = re.compile(r"^[A-Za-z0-9._:-]{3,64}$")
 
 router = APIRouter()
@@ -304,6 +306,7 @@ class SessionPayload(BaseModel):
     payload: dict | None = None
     csv: str | None = None
     csv_b64: str | None = None
+    csv_gzip_b64: str | None = None
     deleted: bool = False
 
 
@@ -330,6 +333,14 @@ class SyncBody(BaseModel):
     sessions: list[SessionPayload] = []
     logs: list[LogPayload] = []
     command_acks: list[int] = []
+
+
+class PhoneSyncBody(BaseModel):
+    since: int = 0
+    replace: bool = True
+    tracks: list[TrackPayload] = []
+    sessions: list[SessionPayload] = []
+    logs: list[LogPayload] = []
 
 
 class TrackEditBody(BaseModel):
@@ -533,6 +544,11 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
     if item.csv is None and item.csv_b64:
         try:
             item.csv = base64.b64decode(item.csv_b64).decode("utf-8")
+        except Exception:
+            item.csv = None
+    if item.csv is None and item.csv_gzip_b64:
+        try:
+            item.csv = gzip.decompress(base64.b64decode(item.csv_gzip_b64)).decode("utf-8")
         except Exception:
             item.csv = None
     existing = conn.execute(
@@ -812,7 +828,7 @@ def sync_history(uid: str, user: dict = Depends(current_user)):
         rows = conn.execute(
             """SELECT id,created_at,revision,upload_bytes,track_count,
                       session_count,log_count FROM sync_history
-               WHERE device_uid=? ORDER BY id DESC LIMIT 3""",
+               WHERE device_uid=? ORDER BY id DESC LIMIT 5""",
             (uid,),
         ).fetchall()
         return {"history": [dict(r) for r in rows]}
@@ -872,11 +888,6 @@ def edit_track(uid: str, local_id: int, body: TrackEditBody, user: dict = Depend
             "UPDATE tracks SET name=?,payload=?,content_hash=?,revision=?,updated_at=? WHERE id=?",
             (payload.get("name", ""), _canonical(payload), digest, rev, _now(), row["id"]),
         )
-        command = {"track_local_id": local_id, "fields": fields}
-        conn.execute(
-            "INSERT INTO commands(device_uid,kind,payload,created_at) VALUES(?,?,?,?)",
-            (uid, "track_update", _canonical(command), _now()),
-        )
         return {"ok": True, "revision": rev, "track": _track_view(
             conn.execute("SELECT * FROM tracks WHERE id=?", (row["id"],)).fetchone()
         )}
@@ -895,11 +906,182 @@ def admin_users(user: dict = Depends(admin_user)):
 
 
 # ---------------------------------------------------------------------------
+# endpoints: phone relay sync
+# ---------------------------------------------------------------------------
+
+def _phone_device(conn: sqlite3.Connection, uid: str, user: dict) -> sqlite3.Row:
+    uid = uid.strip()
+    if not DEVICE_RE.match(uid):
+        raise HTTPException(400, "invalid device uid")
+    dev = _get_device(conn, uid)
+    if dev is None:
+        conn.execute(
+            "INSERT INTO devices(uid,name,created_at,owner_id) VALUES(?,?,?,?)",
+            (uid, "RaceBrick " + uid[-6:], _now(), user["id"]),
+        )
+        dev = _get_device(conn, uid)
+    elif dev["owner_id"] is None:
+        conn.execute("UPDATE devices SET owner_id=? WHERE uid=?", (user["id"], uid))
+        dev = _get_device(conn, uid)
+    elif user["role"] != "admin" and dev["owner_id"] != user["id"]:
+        raise HTTPException(403, "device is already bound to another account")
+    return dev
+
+
+def _record_snapshot(conn: sqlite3.Connection, uid: str, revision: int,
+                     payload: dict, upload_bytes: int,
+                     track_count: int, session_count: int, log_count: int) -> int:
+    clean = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    cur = conn.execute(
+        """INSERT INTO sync_history(device_uid,created_at,revision,upload_bytes,
+           track_count,session_count,log_count,payload)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (uid, _now(), revision, upload_bytes, track_count, session_count,
+         log_count, zlib.compress(clean, 6)),
+    )
+    keep = conn.execute(
+        "SELECT id FROM sync_history WHERE device_uid=? ORDER BY id DESC LIMIT 5",
+        (uid,),
+    ).fetchall()
+    ids = ",".join(str(r["id"]) for r in keep)
+    if ids:
+        conn.execute(
+            f"DELETE FROM sync_history WHERE device_uid=? AND id NOT IN ({ids})",
+            (uid,),
+        )
+    return int(cur.lastrowid)
+
+
+def _mark_missing_deleted(conn: sqlite3.Connection, table: str, key: str,
+                          uid: str, present: set[int]) -> int:
+    rows = conn.execute(
+        f"SELECT * FROM {table} WHERE device_uid=? AND deleted=0", (uid,)
+    ).fetchall()
+    changed = 0
+    for row in rows:
+        if int(row[key]) in present:
+            continue
+        rev = _next_revision(conn)
+        conn.execute(
+            f"UPDATE {table} SET deleted=1,revision=?,updated_at=? WHERE id=?",
+            (rev, _now(), row["id"]),
+        )
+        changed += 1
+    return changed
+
+
+@router.get("/api/phone/v1/devices/{uid}/state")
+def phone_state(uid: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        dev = _phone_device(conn, uid, user)
+        return {
+            "device": _device_public(dev),
+            "revision": _revision(conn),
+            "tracks": conn.execute(
+                "SELECT COUNT(*) AS n FROM tracks WHERE device_uid=? AND deleted=0", (uid,)
+            ).fetchone()["n"],
+            "sessions": conn.execute(
+                "SELECT COUNT(*) AS n FROM sessions WHERE device_uid=? AND deleted=0", (uid,)
+            ).fetchone()["n"],
+            "logs": conn.execute(
+                "SELECT COUNT(*) AS n FROM race_logs WHERE device_uid=? AND deleted=0", (uid,)
+            ).fetchone()["n"],
+            "history": [dict(r) for r in conn.execute(
+                """SELECT id,created_at,revision,upload_bytes,track_count,
+                          session_count,log_count FROM sync_history
+                   WHERE device_uid=? ORDER BY id DESC LIMIT 5""", (uid,)
+            ).fetchall()],
+        }
+
+
+@router.get("/api/phone/v1/devices/{uid}/changes")
+def phone_changes(uid: str, since: int = 0, user: dict = Depends(current_user)):
+    with db() as conn:
+        _phone_device(conn, uid, user)
+        tracks = conn.execute(
+            "SELECT * FROM tracks WHERE device_uid=? AND revision>? ORDER BY local_id",
+            (uid, since),
+        ).fetchall()
+        sessions = conn.execute(
+            "SELECT * FROM sessions WHERE device_uid=? AND revision>? ORDER BY local_slot",
+            (uid, since),
+        ).fetchall()
+        logs = conn.execute(
+            "SELECT * FROM race_logs WHERE device_uid=? AND revision>? ORDER BY local_index",
+            (uid, since),
+        ).fetchall()
+        return {
+            "revision": _revision(conn),
+            "tracks": [_track_view(r) for r in tracks],
+            "sessions": [_session_view(r) for r in sessions],
+            "logs": [_log_view(r) for r in logs],
+        }
+
+
+@router.post("/api/phone/v1/devices/{uid}/sync")
+async def phone_sync(uid: str, request: Request, user: dict = Depends(current_user)):
+    raw = await request.body()
+    try:
+        body = PhoneSyncBody.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(422, f"invalid phone sync body: {exc}")
+    with db() as conn:
+        _phone_device(conn, uid, user)
+        track_ids = {int(t.local_id) for t in body.tracks if not t.deleted}
+        session_ids = {int(s.local_slot) for s in body.sessions if not s.deleted}
+        log_ids = {int(l.local_index) for l in body.logs if not l.deleted}
+        for t in body.tracks:
+            _upsert_track(conn, uid, t)
+        for s in body.sessions:
+            _upsert_session(conn, uid, s)
+        for l in body.logs:
+            _upsert_log(conn, uid, l)
+        if body.replace:
+            _mark_missing_deleted(conn, "tracks", "local_id", uid, track_ids)
+            _mark_missing_deleted(conn, "sessions", "local_slot", uid, session_ids)
+            _mark_missing_deleted(conn, "race_logs", "local_index", uid, log_ids)
+        rev = _revision(conn)
+        now = _now()
+        conn.execute(
+            "UPDATE devices SET last_seen=?,last_sync_at=?,last_sync_revision=? WHERE uid=?",
+            (now, now, rev, uid),
+        )
+        hid = _record_snapshot(
+            conn, uid, rev, body.model_dump(), len(raw),
+            len(track_ids), len(session_ids), len(log_ids),
+        )
+        return {
+            "ok": True,
+            "revision": rev,
+            "synced_at": now,
+            "history_id": hid,
+            "tracks": len(track_ids),
+            "sessions": len(session_ids),
+            "logs": len(log_ids),
+        }
+
+
+@router.get("/api/phone/v1/devices/{uid}/history")
+def phone_history(uid: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        _phone_device(conn, uid, user)
+        rows = conn.execute(
+            """SELECT id,created_at,revision,upload_bytes,track_count,session_count,
+                      log_count FROM sync_history WHERE device_uid=?
+               ORDER BY id DESC LIMIT 5""",
+            (uid,),
+        ).fetchall()
+        return {"history": [dict(r) for r in rows]}
+
+
+# ---------------------------------------------------------------------------
 # endpoints: device provisioning + sync
 # ---------------------------------------------------------------------------
 
 @router.post("/api/device/v1/register")
 def device_register(body: DeviceRegisterBody):
+    if not ALLOW_DIRECT_DEVICE:
+        raise HTTPException(410, "direct device sync retired; use phone relay sync")
     uid = body.device_uid.strip()
     if not DEVICE_RE.match(uid):
         raise HTTPException(400, "invalid device uid")
@@ -927,6 +1109,8 @@ def device_register(body: DeviceRegisterBody):
 
 @router.post("/api/device/v1/sync")
 async def device_sync(request: Request):
+    if not ALLOW_DIRECT_DEVICE:
+        raise HTTPException(410, "direct device sync retired; use phone relay sync")
     raw = await request.body()
     try:
         body = SyncBody.model_validate_json(raw)
@@ -1016,7 +1200,7 @@ async def device_sync(request: Request):
              len(body.logs), zlib.compress(clean, 6)),
         )
         keep = conn.execute(
-            "SELECT id FROM sync_history WHERE device_uid=? ORDER BY id DESC LIMIT 3",
+            "SELECT id FROM sync_history WHERE device_uid=? ORDER BY id DESC LIMIT 5",
             (uid,),
         ).fetchall()
         ids = ",".join(str(r["id"]) for r in keep)
@@ -1055,6 +1239,8 @@ def _verify_device(conn: sqlite3.Connection, uid: str, secret: str) -> sqlite3.R
 @router.get("/api/device/v1/commands")
 def device_commands(uid: str, secret: str | None = None,
                     x_device_secret: str | None = Header(None)):
+    if not ALLOW_DIRECT_DEVICE:
+        raise HTTPException(410, "direct device sync retired; use phone relay sync")
     secret = secret or x_device_secret or ""
     with db() as conn:
         _verify_device(conn, uid, secret)
@@ -1094,6 +1280,8 @@ def device_commands(uid: str, secret: str | None = None,
 @router.post("/api/device/v1/ack")
 def device_ack(uid: str, id: int, secret: str | None = None,
                x_device_secret: str | None = Header(None)):
+    if not ALLOW_DIRECT_DEVICE:
+        raise HTTPException(410, "direct device sync retired; use phone relay sync")
     secret = secret or x_device_secret or ""
     with db() as conn:
         _verify_device(conn, uid, secret)
