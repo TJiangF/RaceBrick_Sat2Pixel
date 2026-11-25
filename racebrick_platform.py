@@ -122,7 +122,8 @@ def _init_db() -> None:
                 created_at INTEGER NOT NULL,
                 last_seen INTEGER,
                 last_sync_at INTEGER,
-                last_sync_revision INTEGER NOT NULL DEFAULT 0
+                last_sync_revision INTEGER NOT NULL DEFAULT 0,
+                data_version INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,6 +201,9 @@ def _init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_tokens_exp ON auth_tokens(expires_at);
             """
         )
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(devices)").fetchall()}
+        if "data_version" not in cols:
+            conn.execute("ALTER TABLE devices ADD COLUMN data_version INTEGER NOT NULL DEFAULT 0")
         conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('revision','0')")
         row = conn.execute("SELECT id FROM users WHERE username=?", (ADMIN_USER,)).fetchone()
         if row is None:
@@ -272,6 +276,7 @@ def _device_public(row: sqlite3.Row, owner: str | None = None) -> dict:
         "created_at": row["created_at"],
         "last_seen": row["last_seen"],
         "last_sync_at": row["last_sync_at"],
+        "data_version": row["data_version"],
     }
 
 
@@ -888,7 +893,8 @@ def edit_track(uid: str, local_id: int, body: TrackEditBody, user: dict = Depend
             "UPDATE tracks SET name=?,payload=?,content_hash=?,revision=?,updated_at=? WHERE id=?",
             (payload.get("name", ""), _canonical(payload), digest, rev, _now(), row["id"]),
         )
-        return {"ok": True, "revision": rev, "track": _track_view(
+        dv = _bump_data_version(conn, uid)
+        return {"ok": True, "revision": rev, "data_version": dv, "track": _track_view(
             conn.execute("SELECT * FROM tracks WHERE id=?", (row["id"],)).fetchone()
         )}
 
@@ -908,6 +914,14 @@ def admin_users(user: dict = Depends(admin_user)):
 # ---------------------------------------------------------------------------
 # endpoints: phone relay sync
 # ---------------------------------------------------------------------------
+
+def _bump_data_version(conn: sqlite3.Connection, uid: str) -> int:
+    conn.execute(
+        "UPDATE devices SET data_version=data_version+1 WHERE uid=?", (uid,)
+    )
+    row = conn.execute("SELECT data_version FROM devices WHERE uid=?", (uid,)).fetchone()
+    return int(row["data_version"]) if row else 0
+
 
 def _phone_device(conn: sqlite3.Connection, uid: str, user: dict) -> sqlite3.Row:
     uid = uid.strip()
@@ -977,6 +991,7 @@ def phone_state(uid: str, user: dict = Depends(current_user)):
         return {
             "device": _device_public(dev),
             "revision": _revision(conn),
+            "data_version": dev["data_version"],
             "tracks": conn.execute(
                 "SELECT COUNT(*) AS n FROM tracks WHERE device_uid=? AND deleted=0", (uid,)
             ).fetchone()["n"],
@@ -1030,16 +1045,22 @@ async def phone_sync(uid: str, request: Request, user: dict = Depends(current_us
         track_ids = {int(t.local_id) for t in body.tracks if not t.deleted}
         session_ids = {int(s.local_slot) for s in body.sessions if not s.deleted}
         log_ids = {int(l.local_index) for l in body.logs if not l.deleted}
+        changed = False
         for t in body.tracks:
-            _upsert_track(conn, uid, t)
+            c, _ = _upsert_track(conn, uid, t)
+            changed |= c
         for s in body.sessions:
-            _upsert_session(conn, uid, s)
+            c, _ = _upsert_session(conn, uid, s)
+            changed |= c
         for l in body.logs:
-            _upsert_log(conn, uid, l)
+            c, _ = _upsert_log(conn, uid, l)
+            changed |= c
         if body.replace:
-            _mark_missing_deleted(conn, "tracks", "local_id", uid, track_ids)
-            _mark_missing_deleted(conn, "sessions", "local_slot", uid, session_ids)
-            _mark_missing_deleted(conn, "race_logs", "local_index", uid, log_ids)
+            changed |= _mark_missing_deleted(conn, "tracks", "local_id", uid, track_ids) > 0
+            changed |= _mark_missing_deleted(conn, "sessions", "local_slot", uid, session_ids) > 0
+            changed |= _mark_missing_deleted(conn, "race_logs", "local_index", uid, log_ids) > 0
+        dv = _bump_data_version(conn, uid) if changed else int(conn.execute(
+            "SELECT data_version FROM devices WHERE uid=?", (uid,)).fetchone()["data_version"])
         rev = _revision(conn)
         now = _now()
         conn.execute(
@@ -1053,11 +1074,41 @@ async def phone_sync(uid: str, request: Request, user: dict = Depends(current_us
         return {
             "ok": True,
             "revision": rev,
+            "data_version": dv,
             "synced_at": now,
             "history_id": hid,
             "tracks": len(track_ids),
             "sessions": len(session_ids),
             "logs": len(log_ids),
+        }
+
+
+@router.get("/api/phone/v1/devices/{uid}/snapshot")
+def phone_snapshot(uid: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        dev = _phone_device(conn, uid, user)
+        tracks = conn.execute(
+            "SELECT * FROM tracks WHERE device_uid=? AND deleted=0 ORDER BY local_id", (uid,)
+        ).fetchall()
+        sessions = conn.execute(
+            "SELECT * FROM sessions WHERE device_uid=? AND deleted=0 ORDER BY local_slot", (uid,)
+        ).fetchall()
+        logs = conn.execute(
+            "SELECT * FROM race_logs WHERE device_uid=? AND deleted=0 ORDER BY local_index", (uid,)
+        ).fetchall()
+        session_views = []
+        for r in sessions:
+            v = _session_view(r)
+            if r["csv"]:
+                v["csv"] = r["csv"]
+            session_views.append(v)
+        return {
+            "device": _device_public(dev),
+            "revision": _revision(conn),
+            "data_version": dev["data_version"],
+            "tracks": [_track_view(r) for r in tracks],
+            "sessions": session_views,
+            "logs": [_log_view(r) for r in logs],
         }
 
 

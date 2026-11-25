@@ -24,6 +24,7 @@ token:
 ```
 GET  /api/phone/v1/devices/{uid}/state
 GET  /api/phone/v1/devices/{uid}/changes?since=<revision>
+GET  /api/phone/v1/devices/{uid}/snapshot
 POST /api/phone/v1/devices/{uid}/sync
 GET  /api/phone/v1/devices/{uid}/history
 ```
@@ -35,6 +36,15 @@ server decompresses it before parsing. Each successful phone sync stores a
 compressed full snapshot and keeps the newest five per device. Cloud Track edits
 are returned by `/changes` so the phone can write them back to the ESP before
 uploading its next snapshot.
+
+Each device also has a monotonically increasing `data_version`, returned by
+`/state`, `/snapshot` and `/sync`. It changes only when that device's data
+changes, either from a phone upload or an account-side Track edit. The Android
+app uses this marker plus a local dirty flag to detect whether it can finish
+immediately or must ask the user whether to load the local or cloud copy.
+`/snapshot` returns the current display copy including session summaries and raw
+CSV for offline caching. The Android app keeps that snapshot locally, supports
+read-only offline browsing, and marks app-side edits as a local dirty version.
 
 The firmware exposes its UID at `GET /api/status` and answers UDP discovery on
 port `4210` for `RACEBRICK_DISCOVER`. Direct firmware-to-cloud sync is retired.
