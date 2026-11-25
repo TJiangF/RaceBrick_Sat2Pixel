@@ -61,7 +61,8 @@ POST /api/device/v1/sync
 - Firmware can poll pending track updates as text with
   `GET /api/device/v1/commands?uid=<uid>` and authenticate with the
   `X-Device-Secret` header. Each line is
-  `command_id|track_local_id|start_f|start_width|start_offset|reverse`.
+  `command_id|track_local_id|start_f|start_width|start_offset|reverse|name_b64`.
+  `name_b64` is the UTF-8 track name encoded as base64.
 - Acknowledge an applied command with
   `POST /api/device/v1/ack?uid=<uid>&id=<command_id>` and the same header.
 
