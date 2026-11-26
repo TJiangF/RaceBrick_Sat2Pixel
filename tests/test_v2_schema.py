@@ -94,6 +94,12 @@ class V2SchemaTest(unittest.TestCase):
             self.assertEqual([r["lap_number"] for r in laps], [1, 2])
             self.assertEqual([r["lap_time_ms"] for r in laps], [2000, 3000])
             self.assertEqual(sum(r["best_lap"] for r in laps), 1)
+            manifest = platform._cloud_manifest(conn, "esp32s3-test")
+            self.assertEqual(manifest["protocol"], 2)
+            self.assertEqual(manifest["tracks"][0]["track_id"], track_uuid)
+            self.assertEqual(manifest["tracks"][0]["version"], 4)
+            self.assertEqual(manifest["sessions"][0]["session_id"], session_uuid)
+            self.assertEqual(manifest["sessions"][0]["track_revision_id"], revision_id)
 
 
 if __name__ == "__main__":

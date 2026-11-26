@@ -1135,6 +1135,13 @@ def admin_users(user: dict = Depends(admin_user)):
         return {"users": [dict(r) for r in rows]}
 
 
+@router.get("/api/v2/devices/{uid}/manifest")
+def cloud_manifest(uid: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        _owned_device(conn, uid, user)
+        return _cloud_manifest(conn, uid)
+
+
 # ---------------------------------------------------------------------------
 # endpoints: phone relay sync
 # ---------------------------------------------------------------------------
@@ -1206,6 +1213,56 @@ def _mark_missing_deleted(conn: sqlite3.Connection, table: str, key: str,
         )
         changed += 1
     return changed
+
+
+def _cloud_manifest(conn: sqlite3.Connection, uid: str) -> dict:
+    dev = _get_device(conn, uid)
+    tracks = conn.execute(
+        "SELECT * FROM tracks WHERE device_uid=? AND deleted=0 ORDER BY name, track_uuid",
+        (uid,),
+    ).fetchall()
+    sessions = conn.execute(
+        "SELECT * FROM sessions WHERE device_uid=? AND deleted=0 ORDER BY start_epoch DESC",
+        (uid,),
+    ).fetchall()
+    return {
+        "protocol": 2,
+        "device_id": uid,
+        "generated_at": _now(),
+        "revision": _revision(conn),
+        "data_version": int(dev["data_version"]) if dev else 0,
+        "tracks": [
+            {
+                "track_id": r["track_uuid"],
+                "local_slot": r["local_id"],
+                "name": r["name"],
+                "version": r["track_version"],
+                "revision_id": r["revision_id"],
+                "parent_revision_id": r["parent_revision_id"],
+                "content_hash": r["content_hash"],
+                "updated_at": r["updated_at"],
+            }
+            for r in tracks
+        ],
+        "sessions": [
+            {
+                "session_id": r["session_uuid"],
+                "local_slot": r["local_slot"],
+                "track_id": r["track_uuid"],
+                "track_revision_id": r["track_revision_id"],
+                "track_version": r["track_version"],
+                "start": r["start_epoch"],
+                "end": r["end_epoch"],
+                "laps": r["lap_count"],
+                "best_lap": r["best_lap"],
+                "best_time": r["best_time"],
+                "sample_size": r["sample_size"],
+                "content_hash": r["content_hash"],
+                "telemetry_available": bool(r["csv"]),
+            }
+            for r in sessions
+        ],
+    }
 
 
 @router.get("/api/phone/v1/devices/{uid}/state")
