@@ -540,6 +540,21 @@ def _upsert_track(conn: sqlite3.Connection, uid: str, item: TrackPayload) -> tup
         return False, None
     if existing and existing["content_hash"] == digest and not existing["deleted"]:
         return False, None
+    # A Track revision may move to a different device slot. If a stale legacy
+    # row still owns that slot, retire it before updating the UUID row.
+    if existing and int(existing["local_id"]) != int(item.local_id):
+        conflict = conn.execute(
+            "SELECT * FROM tracks WHERE device_uid=? AND local_id=? AND id<>?",
+            (uid, item.local_id, existing["id"]),
+        ).fetchone()
+        if conflict is not None:
+            old_uuid = str(conflict["track_uuid"] or "").strip()
+            if not old_uuid or conflict["deleted"]:
+                rev0 = _next_revision(conn)
+                conn.execute(
+                    "UPDATE tracks SET deleted=1,revision=?,updated_at=? WHERE id=?",
+                    (rev0, _now(), conflict["id"]),
+                )
     rev = _next_revision(conn)
     now = _now()
     values = (
@@ -1197,6 +1212,30 @@ def _record_snapshot(conn: sqlite3.Connection, uid: str, revision: int,
     return int(cur.lastrowid)
 
 
+def _cleanup_legacy_tracks(conn: sqlite3.Connection, uid: str) -> int:
+    """Remove legacy track rows that have no UUID when a UUID track with the
+    same name exists. This clears duplicate rows created by pre-UUID uploads
+    without touching a genuinely unique legacy track."""
+    rows = conn.execute(
+        """SELECT t.id,t.name FROM tracks t
+           WHERE t.device_uid=? AND t.deleted=0 AND (t.track_uuid IS NULL OR t.track_uuid='')
+             AND EXISTS (SELECT 1 FROM tracks u
+                         WHERE u.device_uid=t.device_uid AND u.deleted=0
+                           AND u.track_uuid IS NOT NULL AND u.track_uuid<>''
+                           AND u.name=t.name)""",
+        (uid,),
+    ).fetchall()
+    changed = 0
+    for r in rows:
+        rev = _next_revision(conn)
+        conn.execute(
+            "UPDATE tracks SET deleted=1,revision=?,updated_at=? WHERE id=?",
+            (rev, _now(), r["id"]),
+        )
+        changed += 1
+    return changed
+
+
 def _mark_missing_deleted(conn: sqlite3.Connection, table: str, key: str,
                           uid: str, present: set[int]) -> int:
     rows = conn.execute(
@@ -1340,6 +1379,7 @@ async def phone_sync(uid: str, request: Request, user: dict = Depends(current_us
             changed |= _mark_missing_deleted(conn, "tracks", "local_id", uid, track_ids) > 0
             changed |= _mark_missing_deleted(conn, "sessions", "local_slot", uid, session_ids) > 0
             changed |= _mark_missing_deleted(conn, "race_logs", "local_index", uid, log_ids) > 0
+        changed |= _cleanup_legacy_tracks(conn, uid) > 0
         dv = _bump_data_version(conn, uid) if changed else int(conn.execute(
             "SELECT data_version FROM devices WHERE uid=?", (uid,)).fetchone()["data_version"])
         rev = _revision(conn)
