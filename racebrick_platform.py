@@ -171,6 +171,7 @@ def _init_db() -> None:
                 metadata_hash TEXT,
                 laps_hash TEXT,
                 telemetry_hash TEXT,
+                device_hash TEXT,
                 UNIQUE(device_uid, local_slot)
             );
             CREATE TABLE IF NOT EXISTS race_logs (
@@ -282,6 +283,7 @@ def _init_db() -> None:
             "sample_size": "INTEGER NOT NULL DEFAULT 16",
             "raw_format": "INTEGER NOT NULL DEFAULT 16",
             "metadata_hash": "TEXT", "laps_hash": "TEXT", "telemetry_hash": "TEXT",
+            "device_hash": "TEXT",
         })
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_uuid ON tracks(device_uid, track_uuid) WHERE track_uuid IS NOT NULL")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_uuid ON sessions(device_uid, session_uuid) WHERE session_uuid IS NOT NULL")
@@ -790,12 +792,13 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
     metadata_hash = _content_hash(payload.get("metadata") or {})
     laps_hash = _content_hash(summary["laps"])
     telemetry_hash = hashlib.sha256((csv_text or "").encode("utf-8")).hexdigest()
+    device_hash = str(payload.get("content_hash") or "").strip() or None
     vals = (
         _canonical(payload), csv_text, _canonical(summary), digest, rev, now,
         track, str(payload.get("track_name") or ""), start_epoch, duration_ms,
         len(summary["laps"]), best, best_time,
         session_uuid, track_uuid, track_revision_id, track_version, end_epoch,
-        sample_size, sample_size, metadata_hash, laps_hash, telemetry_hash,
+        sample_size, sample_size, metadata_hash, laps_hash, telemetry_hash, device_hash,
     )
     if existing:
         conn.execute(
@@ -804,7 +807,7 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
                duration_ms=?,lap_count=?,best_lap=?,best_time=?,
                session_uuid=?,track_uuid=?,track_revision_id=?,track_version=?,
                end_epoch=?,sample_size=?,raw_format=?,metadata_hash=?,laps_hash=?,
-               telemetry_hash=?,deleted=0 WHERE id=?""",
+               telemetry_hash=?,device_hash=?,deleted=0 WHERE id=?""",
             vals + (existing["id"],),
         )
     else:
@@ -813,11 +816,11 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
                updated_at,track_local_id,track_name,start_epoch,duration_ms,lap_count,
                best_lap,best_time,session_uuid,track_uuid,track_revision_id,track_version,
                end_epoch,sample_size,raw_format,metadata_hash,laps_hash,telemetry_hash,
-               local_slot,deleted)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+               device_hash,local_slot,deleted)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
             (uid, *vals[:13], session_uuid, track_uuid, track_revision_id, track_version,
              end_epoch, sample_size, sample_size, metadata_hash, laps_hash, telemetry_hash,
-             item.local_slot),
+             device_hash, item.local_slot),
         )
 
     conn.execute("DELETE FROM lap_records WHERE device_uid=? AND session_uuid=?",
@@ -915,6 +918,7 @@ def _session_view(row: sqlite3.Row) -> dict:
         "end_epoch": row["end_epoch"],
         "duration_ms": row["duration_ms"],
         "sample_size": row["sample_size"],
+        "content_hash": row["device_hash"],
         "laps": row["lap_count"],
         "best_lap": row["best_lap"],
         "best_time": row["best_time"],
@@ -1296,7 +1300,7 @@ def _cloud_manifest(conn: sqlite3.Connection, uid: str) -> dict:
                 "best_lap": r["best_lap"],
                 "best_time": r["best_time"],
                 "sample_size": r["sample_size"],
-                "content_hash": r["content_hash"],
+                "content_hash": r["device_hash"] or r["content_hash"],
                 "telemetry_available": bool(r["csv"]),
             }
             for r in sessions
