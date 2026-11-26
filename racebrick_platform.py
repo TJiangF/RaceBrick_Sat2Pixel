@@ -20,6 +20,7 @@ import re
 import secrets
 import sqlite3
 import time
+import uuid
 import zlib
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,11 @@ def _init_db() -> None:
                 revision INTEGER NOT NULL,
                 deleted INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL,
+                track_uuid TEXT,
+                revision_id TEXT,
+                parent_revision_id TEXT,
+                track_version INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER,
                 UNIQUE(device_uid, local_id)
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -155,6 +161,16 @@ def _init_db() -> None:
                 lap_count INTEGER NOT NULL DEFAULT 0,
                 best_lap INTEGER,
                 best_time REAL,
+                session_uuid TEXT,
+                track_uuid TEXT,
+                track_revision_id TEXT,
+                track_version INTEGER NOT NULL DEFAULT 0,
+                end_epoch INTEGER,
+                sample_size INTEGER NOT NULL DEFAULT 16,
+                raw_format INTEGER NOT NULL DEFAULT 16,
+                metadata_hash TEXT,
+                laps_hash TEXT,
+                telemetry_hash TEXT,
                 UNIQUE(device_uid, local_slot)
             );
             CREATE TABLE IF NOT EXISTS race_logs (
@@ -193,6 +209,50 @@ def _init_db() -> None:
                 log_count INTEGER NOT NULL,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS track_revisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_uid TEXT NOT NULL,
+                track_uuid TEXT NOT NULL,
+                revision_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                parent_revision_id TEXT,
+                payload TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                created_by TEXT NOT NULL DEFAULT 'device',
+                created_at INTEGER NOT NULL,
+                UNIQUE(device_uid, track_uuid, revision_id)
+            );
+            CREATE TABLE IF NOT EXISTS lap_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_uid TEXT NOT NULL,
+                session_uuid TEXT NOT NULL,
+                lap_id TEXT NOT NULL,
+                lap_number INTEGER NOT NULL,
+                lap_time_ms INTEGER NOT NULL,
+                sector_times_ms TEXT NOT NULL DEFAULT '[]',
+                start_time INTEGER,
+                end_time INTEGER,
+                best_lap INTEGER NOT NULL DEFAULT 0,
+                telemetry_reference TEXT NOT NULL DEFAULT '{}',
+                content_hash TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(device_uid, session_uuid, lap_id)
+            );
+            CREATE TABLE IF NOT EXISTS telemetry_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_uid TEXT NOT NULL,
+                session_uuid TEXT NOT NULL,
+                chunk_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                byte_offset INTEGER NOT NULL DEFAULT 0,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                storage_path TEXT,
+                created_at INTEGER NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(device_uid, chunk_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_tracks_dev_rev ON tracks(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_sessions_dev_rev ON sessions(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_logs_dev_rev ON race_logs(device_uid, revision);
@@ -204,6 +264,29 @@ def _init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(devices)").fetchall()}
         if "data_version" not in cols:
             conn.execute("ALTER TABLE devices ADD COLUMN data_version INTEGER NOT NULL DEFAULT 0")
+
+        def ensure_cols(table: str, defs: dict[str, str]) -> None:
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for name, ddl in defs.items():
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+        ensure_cols("tracks", {
+            "track_uuid": "TEXT", "revision_id": "TEXT",
+            "parent_revision_id": "TEXT", "track_version": "INTEGER NOT NULL DEFAULT 1",
+            "created_at": "INTEGER",
+        })
+        ensure_cols("sessions", {
+            "session_uuid": "TEXT", "track_uuid": "TEXT", "track_revision_id": "TEXT",
+            "track_version": "INTEGER NOT NULL DEFAULT 0", "end_epoch": "INTEGER",
+            "sample_size": "INTEGER NOT NULL DEFAULT 16",
+            "raw_format": "INTEGER NOT NULL DEFAULT 16",
+            "metadata_hash": "TEXT", "laps_hash": "TEXT", "telemetry_hash": "TEXT",
+        })
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_uuid ON tracks(device_uid, track_uuid) WHERE track_uuid IS NOT NULL")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_uuid ON sessions(device_uid, session_uuid) WHERE session_uuid IS NOT NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_laps_session ON lap_records(device_uid, session_uuid, lap_number)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_session ON telemetry_chunks(device_uid, session_uuid, seq)")
         conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('revision','0')")
         row = conn.execute("SELECT id FROM users WHERE username=?", (ADMIN_USER,)).fetchone()
         if row is None:
@@ -376,9 +459,14 @@ def _track_view(row: sqlite3.Row, include_payload: bool = True) -> dict:
     payload = json.loads(row["payload"])
     out = {
         "local_id": row["local_id"],
+        "track_uuid": row["track_uuid"],
+        "version": row["track_version"],
+        "revision_id": row["revision_id"],
+        "parent_revision_id": row["parent_revision_id"],
         "name": row["name"],
         "hash": row["content_hash"],
         "revision": row["revision"],
+        "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "deleted": bool(row["deleted"]),
     }
@@ -402,9 +490,45 @@ def _clean_track_payload(payload: dict) -> dict:
 
 
 def _upsert_track(conn: sqlite3.Connection, uid: str, item: TrackPayload) -> tuple[bool, str | None]:
-    existing = conn.execute(
-        "SELECT * FROM tracks WHERE device_uid=? AND local_id=?", (uid, item.local_id)
-    ).fetchone()
+    if item.payload is None:
+        existing = conn.execute(
+            "SELECT * FROM tracks WHERE device_uid=? AND local_id=?", (uid, item.local_id)
+        ).fetchone()
+        if item.deleted:
+            if existing and not existing["deleted"]:
+                rev = _next_revision(conn)
+                conn.execute(
+                    "UPDATE tracks SET deleted=1,revision=?,updated_at=? WHERE id=?",
+                    (rev, _now(), existing["id"]),
+                )
+                return True, str(rev)
+            return False, None
+        if existing is None:
+            return False, "upload"
+        if item.hash and item.hash != existing["content_hash"]:
+            return False, "upload"
+        return False, None
+
+    payload = _clean_track_payload(item.payload)
+    digest = _content_hash(payload)
+    track_uuid = str(payload.get("uuid") or "").strip()
+    version = int(payload.get("version") or 1)
+    revision_id = str(payload.get("revision_id") or "").strip()
+    parent = str(payload.get("parent_revision_id") or "").strip() or None
+    if not track_uuid:
+        track_uuid = None
+    if not revision_id and track_uuid:
+        revision_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                     f"racebrick:trackrev:{track_uuid}:{version}:{digest}"))
+    existing = None
+    if track_uuid:
+        existing = conn.execute(
+            "SELECT * FROM tracks WHERE device_uid=? AND track_uuid=?", (uid, track_uuid)
+        ).fetchone()
+    if existing is None:
+        existing = conn.execute(
+            "SELECT * FROM tracks WHERE device_uid=? AND local_id=?", (uid, item.local_id)
+        ).fetchone()
     if item.deleted:
         if existing and not existing["deleted"]:
             rev = _next_revision(conn)
@@ -414,28 +538,37 @@ def _upsert_track(conn: sqlite3.Connection, uid: str, item: TrackPayload) -> tup
             )
             return True, str(rev)
         return False, None
-    if item.payload is None:
-        if existing is None:
-            return False, "upload"
-        if item.hash and item.hash != existing["content_hash"]:
-            return False, "upload"
-        return False, None
-    payload = _clean_track_payload(item.payload)
-    digest = _content_hash(payload)
     if existing and existing["content_hash"] == digest and not existing["deleted"]:
         return False, None
     rev = _next_revision(conn)
+    now = _now()
+    values = (
+        payload.get("name", ""), _canonical(payload), digest, rev, now,
+        item.local_id, track_uuid, revision_id, parent, version,
+        existing["created_at"] if existing else now,
+    )
     if existing:
         conn.execute(
-            """UPDATE tracks SET name=?,payload=?,content_hash=?,revision=?,
-               deleted=0,updated_at=? WHERE id=?""",
-            (payload.get("name", ""), _canonical(payload), digest, rev, _now(), existing["id"]),
+            """UPDATE tracks SET name=?,payload=?,content_hash=?,revision=?,updated_at=?,
+               local_id=?,track_uuid=?,revision_id=?,parent_revision_id=?,track_version=?,
+               created_at=?,deleted=0 WHERE id=?""",
+            values + (existing["id"],),
         )
     else:
         conn.execute(
-            """INSERT INTO tracks(device_uid,local_id,name,payload,content_hash,revision,
-               deleted,updated_at) VALUES(?,?,?,?,?,?,0,?)""",
-            (uid, item.local_id, payload.get("name", ""), _canonical(payload), digest, rev, _now()),
+            """INSERT INTO tracks(device_uid,name,payload,content_hash,revision,updated_at,
+               local_id,track_uuid,revision_id,parent_revision_id,track_version,created_at,deleted)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+            (uid, *values),
+        )
+    if track_uuid and revision_id:
+        conn.execute(
+            """INSERT OR IGNORE INTO track_revisions
+               (device_uid,track_uuid,revision_id,version,parent_revision_id,payload,
+                content_hash,created_by,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (uid, track_uuid, revision_id, version, parent, _canonical(payload), digest,
+             "device", now),
         )
     return True, str(rev)
 
@@ -444,13 +577,19 @@ def _upsert_track(conn: sqlite3.Connection, uid: str, item: TrackPayload) -> tup
 # session processing
 # ---------------------------------------------------------------------------
 
-def _track_payload(conn: sqlite3.Connection, uid: str, local_id: int | None) -> dict | None:
-    if local_id is None:
-        return None
-    row = conn.execute(
-        "SELECT payload FROM tracks WHERE device_uid=? AND local_id=? AND deleted=0",
-        (uid, local_id),
-    ).fetchone()
+def _track_payload(conn: sqlite3.Connection, uid: str, local_id: int | None,
+                   track_uuid: str | None = None) -> dict | None:
+    row = None
+    if track_uuid:
+        row = conn.execute(
+            "SELECT payload FROM tracks WHERE device_uid=? AND track_uuid=? AND deleted=0",
+            (uid, track_uuid),
+        ).fetchone()
+    if row is None and local_id is not None:
+        row = conn.execute(
+            "SELECT payload FROM tracks WHERE device_uid=? AND local_id=? AND deleted=0",
+            (uid, local_id),
+        ).fetchone()
     return json.loads(row["payload"]) if row else None
 
 
@@ -476,7 +615,8 @@ def _process_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) -
     lap_times = [float(x) for x in (payload.get("lap_times") or [])]
     deleted_mask = int(payload.get("deleted_laps") or 0)
     track_id = payload.get("track")
-    track = _track_payload(conn, uid, int(track_id) if track_id is not None else None)
+    track = _track_payload(conn, uid, int(track_id) if track_id is not None else None,
+                           str(payload.get("track_uuid") or "") or None)
     rows: list[dict] = []
     for row in csv.reader(io.StringIO(csv_text)):
         if len(row) < 7:
@@ -556,9 +696,20 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
             item.csv = gzip.decompress(base64.b64decode(item.csv_gzip_b64)).decode("utf-8")
         except Exception:
             item.csv = None
-    existing = conn.execute(
-        "SELECT * FROM sessions WHERE device_uid=? AND local_slot=?", (uid, item.local_slot)
-    ).fetchone()
+
+    supplied = dict(item.payload or {})
+    session_uuid = str(supplied.get("session_uuid") or "").strip() or None
+    existing = None
+    if session_uuid:
+        existing = conn.execute(
+            "SELECT * FROM sessions WHERE device_uid=? AND session_uuid=?",
+            (uid, session_uuid),
+        ).fetchone()
+    if existing is None:
+        existing = conn.execute(
+            "SELECT * FROM sessions WHERE device_uid=? AND local_slot=?",
+            (uid, item.local_slot),
+        ).fetchone()
     if item.deleted:
         if existing and not existing["deleted"]:
             rev = _next_revision(conn)
@@ -575,13 +726,38 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
     if existing and item.payload is None:
         payload = json.loads(existing["payload"])
     else:
-        payload = dict(item.payload or {})
+        payload = supplied
     csv_text = item.csv
     if csv_text is None and existing:
         csv_text = existing["csv"]
     digest = _content_hash(payload, csv_text)
     if existing and existing["content_hash"] == digest and not existing["deleted"]:
         return False, None
+
+    if not session_uuid and existing and existing["session_uuid"]:
+        session_uuid = existing["session_uuid"]
+    if not session_uuid:
+        session_uuid = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"racebrick:session:{uid}:{item.local_slot}:{digest}",
+        ))
+
+    track_uuid = str(payload.get("track_uuid") or "").strip() or None
+    track_revision_id = str(payload.get("track_revision_id") or "").strip() or None
+    track = payload.get("track")
+    if track_uuid is None and track is not None:
+        row = conn.execute(
+            "SELECT track_uuid FROM tracks WHERE device_uid=? AND local_id=? AND deleted=0",
+            (uid, int(track)),
+        ).fetchone()
+        track_uuid = row["track_uuid"] if row else None
+    if track_revision_id is None and track_uuid:
+        row = conn.execute(
+            "SELECT revision_id FROM tracks WHERE device_uid=? AND track_uuid=? AND deleted=0",
+            (uid, track_uuid),
+        ).fetchone()
+        track_revision_id = row["revision_id"] if row else None
+
     item.payload = payload
     item.csv = csv_text
     summary = _process_session(conn, uid, item)
@@ -589,25 +765,67 @@ def _upsert_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) ->
     best_time = summary.get("best_time")
     rev = _next_revision(conn)
     now = _now()
+    start_epoch = int(payload.get("start") or 0)
+    duration_ms = int(payload.get("duration_ms") or 0)
+    end_epoch = int(payload.get("end") or (start_epoch + duration_ms // 1000))
+    track_version = int(payload.get("track_version") or 0)
+    sample_size = int(payload.get("sample_size") or 16)
+    if sample_size not in (16, 20):
+        sample_size = 16
+    metadata_hash = _content_hash(payload.get("metadata") or {})
+    laps_hash = _content_hash(summary["laps"])
+    telemetry_hash = hashlib.sha256((csv_text or "").encode("utf-8")).hexdigest()
     vals = (
         _canonical(payload), csv_text, _canonical(summary), digest, rev, now,
-        payload.get("track"), str(payload.get("track_name") or ""),
-        int(payload.get("start") or 0), int(payload.get("duration_ms") or 0),
+        track, str(payload.get("track_name") or ""), start_epoch, duration_ms,
         len(summary["laps"]), best, best_time,
+        session_uuid, track_uuid, track_revision_id, track_version, end_epoch,
+        sample_size, sample_size, metadata_hash, laps_hash, telemetry_hash,
     )
     if existing:
         conn.execute(
             """UPDATE sessions SET payload=?,csv=?,summary=?,content_hash=?,revision=?,
-               deleted=0,updated_at=?,track_local_id=?,track_name=?,start_epoch=?,
-               duration_ms=?,lap_count=?,best_lap=?,best_time=? WHERE id=?""",
+               updated_at=?,track_local_id=?,track_name=?,start_epoch=?,
+               duration_ms=?,lap_count=?,best_lap=?,best_time=?,
+               session_uuid=?,track_uuid=?,track_revision_id=?,track_version=?,
+               end_epoch=?,sample_size=?,raw_format=?,metadata_hash=?,laps_hash=?,
+               telemetry_hash=?,deleted=0 WHERE id=?""",
             vals + (existing["id"],),
         )
     else:
         conn.execute(
-            """INSERT INTO sessions(device_uid,local_slot,payload,csv,summary,content_hash,
-               revision,deleted,updated_at,track_local_id,track_name,start_epoch,
-               duration_ms,lap_count,best_lap,best_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (uid, item.local_slot, *vals[:5], 0, *vals[5:]),
+            """INSERT INTO sessions(device_uid,payload,csv,summary,content_hash,revision,
+               updated_at,track_local_id,track_name,start_epoch,duration_ms,lap_count,
+               best_lap,best_time,session_uuid,track_uuid,track_revision_id,track_version,
+               end_epoch,sample_size,raw_format,metadata_hash,laps_hash,telemetry_hash,
+               local_slot,deleted)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+            (uid, *vals[:13], session_uuid, track_uuid, track_revision_id, track_version,
+             end_epoch, sample_size, sample_size, metadata_hash, laps_hash, telemetry_hash,
+             item.local_slot),
+        )
+
+    conn.execute("DELETE FROM lap_records WHERE device_uid=? AND session_uuid=?",
+                 (uid, session_uuid))
+    supplied_lap_ids = payload.get("lap_ids") if isinstance(payload.get("lap_ids"), list) else []
+    for idx, lap in enumerate(summary["laps"]):
+        lap_number = int(lap["lap"])
+        lap_id = str(supplied_lap_ids[idx]) if idx < len(supplied_lap_ids) else str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"racebrick:lap:{session_uuid}:{lap_number}",
+        ))
+        ref = json.dumps({"samples": int(lap.get("samples") or 0)},
+                         ensure_ascii=False, separators=(",", ":"))
+        conn.execute(
+            """INSERT OR REPLACE INTO lap_records
+               (device_uid,session_uuid,lap_id,lap_number,lap_time_ms,sector_times_ms,
+                start_time,end_time,best_lap,telemetry_reference,content_hash,deleted,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?)""",
+            (uid, session_uuid, lap_id, lap_number,
+             int(round(float(lap.get("time") or 0.0) * 1000.0)),
+             "[]", None, None,
+             1 if best is not None and lap_number == int(best) else 0,
+             ref, _content_hash(lap), now),
         )
     return True, str(rev)
 
@@ -668,14 +886,20 @@ def _upsert_log(conn: sqlite3.Connection, uid: str, item: LogPayload) -> tuple[b
 def _session_view(row: sqlite3.Row) -> dict:
     return {
         "local_slot": row["local_slot"],
+        "session_uuid": row["session_uuid"],
         "hash": row["content_hash"],
         "revision": row["revision"],
         "deleted": bool(row["deleted"]),
         "updated_at": row["updated_at"],
         "track_local_id": row["track_local_id"],
+        "track_uuid": row["track_uuid"],
+        "track_revision_id": row["track_revision_id"],
+        "track_version": row["track_version"],
         "track_name": row["track_name"],
         "start_epoch": row["start_epoch"],
+        "end_epoch": row["end_epoch"],
         "duration_ms": row["duration_ms"],
+        "sample_size": row["sample_size"],
         "laps": row["lap_count"],
         "best_lap": row["best_lap"],
         "best_time": row["best_time"],
