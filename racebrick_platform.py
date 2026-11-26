@@ -1380,6 +1380,10 @@ def phone_snapshot(uid: str, user: dict = Depends(current_user)):
         session_views = []
         for r in sessions:
             v = _session_view(r)
+            try:
+                v["payload"] = json.loads(r["payload"])
+            except Exception:
+                v["payload"] = {}
             if r["csv"]:
                 v["csv"] = r["csv"]
             session_views.append(v)
