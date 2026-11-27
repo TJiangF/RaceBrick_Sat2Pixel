@@ -626,9 +626,25 @@ def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return math.hypot((lon2 - lon1) * kx, (lat2 - lat1) * 111320.0)
 
 
+def _csv_speed_scale(csv_text: str) -> float:
+    try:
+        rows = list(csv.reader(io.StringIO(csv_text)))[:8]
+    except Exception:
+        return 1.0
+    for i, row in enumerate(rows[:-1]):
+        for col, name in enumerate(row):
+            if name.strip().lower() == "speed":
+                units = rows[i + 1]
+                if col < len(units) and units[col].strip().lower() in ("m/s", "mps"):
+                    return 3.6
+                return 1.0
+    return 1.0
+
+
 def _process_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) -> dict:
     payload = dict(item.payload or {})
     csv_text = item.csv or ""
+    speed_scale = _csv_speed_scale(csv_text)
     lap_times = [float(x) for x in (payload.get("lap_times") or [])]
     deleted_mask = int(payload.get("deleted_laps") or 0)
     track_id = payload.get("track")
@@ -644,7 +660,7 @@ def _process_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) -
             elapsed = float(row[3])
             lat = float(row[4])
             lon = float(row[5])
-            speed = float(row[6])
+            speed = float(row[6]) * speed_scale
         except Exception:
             continue
         if lap <= 0:
@@ -664,6 +680,19 @@ def _process_session(conn: sqlite3.Connection, uid: str, item: SessionPayload) -
         if deleted_mask & (1 << (r["lap"] - 1)):
             continue
         by_lap.setdefault(r["lap"], []).append(r)
+    for rs in by_lap.values():
+        if len(rs) < 2:
+            continue
+        dist = 0.0
+        for a, b in zip(rs, rs[1:]):
+            dist += _dist_m(a["lat"], a["lon"], b["lat"], b["lon"])
+        dt = rs[-1]["elapsed"] - rs[0]["elapsed"]
+        raw_avg = sum(r["kmh"] for r in rs) / len(rs)
+        actual_avg = dist / dt * 3.6 if dt > 0 else 0.0
+        ratio = actual_avg / raw_avg if raw_avg > 0 else 0.0
+        if 2.5 < ratio < 5.0:
+            for r in rs:
+                r["kmh"] *= ratio
     laps = []
     for lap in sorted(by_lap):
         rs = by_lap[lap]
