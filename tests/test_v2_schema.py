@@ -259,5 +259,74 @@ class V2SchemaTest(unittest.TestCase):
         self.assertNotIn(public_ids[0], [t["public_id"] for t in after["tracks"]])
 
 
+    def test_public_leaderboard_uses_shared_laps_and_stable_rank(self):
+        with platform.db() as conn:
+            owner = conn.execute(
+                "INSERT INTO users(username,password_hash,role,public_name,created_at) VALUES(?,?,?,?,?)",
+                ("leader-owner", platform._hash_password("password123"), "user", "Alice", platform._now()),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO devices(uid,name,owner_id,created_at) VALUES(?,?,?,?)",
+                ("esp32s3-leader-test", "leader-test", owner, platform._now()),
+            )
+            track_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            payload = {"uuid": track_uuid, "name": "Leader Track", "geo": False,
+                       "points": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]}
+            conn.execute(
+                """INSERT INTO tracks(device_uid,local_id,name,payload,content_hash,
+                   revision,deleted,updated_at,track_uuid,track_version)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                ("esp32s3-leader-test", 1, "Leader Track", platform._canonical(payload),
+                 "leader-track-hash", 1, 0, platform._now(), track_uuid, 1),
+            )
+            owner_user = {"id": owner, "username": "leader-owner", "role": "user"}
+            sessions = []
+            for idx, times in enumerate(([3000, 2500], [2500, 2400], [1000])):
+                sid = f"ccccccc{idx}-cccc-4ccc-8ccc-cccccccccccc"
+                sessions.append(sid)
+                conn.execute(
+                    """INSERT INTO sessions(device_uid,local_slot,payload,csv,content_hash,
+                       revision,deleted,updated_at,session_uuid,track_uuid,lap_count)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    ("esp32s3-leader-test", idx, "{}", "", f"session-hash-{idx}",
+                     1, 0, platform._now(), sid, track_uuid, len(times)),
+                )
+                for lap_no, lap_ms in enumerate(times, 1):
+                    conn.execute(
+                        """INSERT INTO lap_records(device_uid,session_uuid,lap_id,lap_number,
+                           lap_time_ms,sector_times_ms,best_lap,telemetry_reference,content_hash,
+                           deleted,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        ("esp32s3-leader-test", sid, f"lap-{idx}-{lap_no}", lap_no,
+                         lap_ms, "[]", 1 if lap_ms == min(times) else 0, "{}",
+                         f"lap-hash-{idx}-{lap_no}", 0, platform._now()),
+                    )
+        public_id = platform.set_track_sharing(
+            "esp32s3-leader-test", track_uuid,
+            platform.TrackShareBody(public=True), owner_user,
+        )["public_id"]
+        platform.set_session_sharing(
+            "esp32s3-leader-test", sessions[0],
+            platform.SessionShareBody(laps_public=True), owner_user)
+        platform.set_session_sharing(
+            "esp32s3-leader-test", sessions[1],
+            platform.SessionShareBody(laps_public=True), owner_user)
+
+        board = platform.public_leaderboard(public_id)
+        self.assertEqual(board["format"], "racebrick-public-leaderboard-v1")
+        self.assertEqual([e["lap_time_ms"] for e in board["entries"]], [2400, 2500])
+        self.assertEqual([e["rank"] for e in board["entries"]], [1, 2])
+        self.assertEqual(board["entries"][0]["driver"], "Alice")
+        self.assertNotIn("device_uid", board["entries"][0])
+        self.assertNotIn("session_uuid", board["entries"][0])
+
+        with platform.db() as conn:
+            platform.set_session_sharing(
+                "esp32s3-leader-test", sessions[0],
+                platform.SessionShareBody(laps_public=False), owner_user)
+        board = platform.public_leaderboard(public_id)
+        self.assertEqual([e["lap_number"] for e in board["entries"]], [2])
+        self.assertEqual([e["lap_time_ms"] for e in board["entries"]], [2400])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1495,6 +1495,105 @@ def public_track(public_id: str):
     return {"format": PUBLIC_TRACK_FORMAT, "track": track}
 
 
+def _leaderboard_cursor_encode(lap_ms: int, session_uuid: str, lap_number: int) -> str:
+    raw = f"{int(lap_ms)}|{session_uuid}|{int(lap_number)}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _leaderboard_cursor_decode(cursor: str | None) -> tuple[int, str, int] | None:
+    if not cursor:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode("utf-8")
+        lap_ms, session_uuid, lap_number = raw.split("|", 2)
+        return int(lap_ms), session_uuid, int(lap_number)
+    except Exception:
+        raise HTTPException(400, "invalid cursor")
+
+
+@router.get("/api/public/v1/tracks/{public_id}/leaderboard")
+def public_leaderboard(public_id: str, limit: int = 20, cursor: str | None = None):
+    limit = max(1, min(int(limit), 50))
+    after = _leaderboard_cursor_decode(cursor)
+    with db() as conn:
+        track = conn.execute(
+            """SELECT t.device_uid,t.track_uuid
+               FROM track_shares ts
+               JOIN tracks t ON t.device_uid=ts.device_uid AND t.track_uuid=ts.track_uuid
+               JOIN devices d ON d.uid=t.device_uid
+               WHERE ts.public_id=? AND ts.is_public=1
+                 AND t.deleted=0 AND d.owner_id IS NOT NULL""",
+            (public_id,),
+        ).fetchone()
+        if track is None:
+            raise HTTPException(404, "public track not found")
+        where = ""
+        args: list[Any] = [track["device_uid"], track["track_uuid"]]
+        if after is not None:
+            where = """WHERE (lap_time_ms > ? OR
+                       (lap_time_ms = ? AND
+                        (session_uuid > ? OR (session_uuid = ? AND lap_number > ?))))"""
+            args.extend([after[0], after[0], after[1], after[1], after[2]])
+        args.append(limit + 1)
+        rows = conn.execute(
+            f"""WITH candidates AS (
+                    SELECT lr.session_uuid,lr.lap_number,lr.lap_time_ms,lr.updated_at,
+                           COALESCE(NULLIF(u.public_name,''), '匿名车手') AS driver,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY lr.session_uuid
+                               ORDER BY lr.lap_time_ms ASC, lr.lap_number ASC
+                           ) AS rn
+                    FROM lap_records lr
+                    JOIN sessions s ON s.device_uid=lr.device_uid
+                      AND s.session_uuid=lr.session_uuid
+                    JOIN session_shares ss ON ss.device_uid=s.device_uid
+                      AND ss.session_uuid=s.session_uuid
+                    JOIN tracks t ON t.device_uid=s.device_uid
+                      AND t.track_uuid=s.track_uuid
+                    JOIN track_shares ts ON ts.device_uid=t.device_uid
+                      AND ts.track_uuid=t.track_uuid
+                    JOIN devices d ON d.uid=t.device_uid
+                    LEFT JOIN users u ON u.id=d.owner_id
+                    WHERE s.device_uid=? AND s.track_uuid=?
+                      AND s.deleted=0 AND t.deleted=0
+                      AND ts.is_public=1 AND ss.laps_public=1
+                      AND lr.deleted=0 AND lr.lap_time_ms>0
+                ),
+                best AS (SELECT * FROM candidates WHERE rn=1),
+                ranked AS (
+                    SELECT session_uuid,lap_number,lap_time_ms,updated_at,driver,
+                           RANK() OVER (ORDER BY lap_time_ms ASC) AS position
+                    FROM best
+                )
+                SELECT * FROM ranked
+                {where}
+                ORDER BY lap_time_ms ASC, session_uuid ASC, lap_number ASC
+                LIMIT ?""",
+            args,
+        ).fetchall()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    entries = [{
+        "rank": int(r["position"]),
+        "driver": r["driver"],
+        "lap_number": int(r["lap_number"]),
+        "lap_time_ms": int(r["lap_time_ms"]),
+        "updated_at": r["updated_at"],
+    } for r in rows]
+    next_cursor = None
+    if more and rows:
+        last = rows[-1]
+        next_cursor = _leaderboard_cursor_encode(
+            int(last["lap_time_ms"]), str(last["session_uuid"]), int(last["lap_number"])
+        )
+    return {
+        "format": "racebrick-public-leaderboard-v1",
+        "track_public_id": public_id,
+        "entries": entries,
+        "next_cursor": next_cursor,
+    }
+
+
 @router.get("/api/platform/admin/users")
 def admin_users(user: dict = Depends(admin_user)):
     with db() as conn:
