@@ -1537,7 +1537,8 @@ def public_leaderboard(public_id: str, limit: int = 20, cursor: str | None = Non
         args.append(limit + 1)
         rows = conn.execute(
             f"""WITH candidates AS (
-                    SELECT lr.session_uuid,lr.lap_number,lr.lap_time_ms,lr.updated_at,
+                    SELECT lr.session_uuid,ss.public_id AS session_public_id,
+                           lr.lap_number,lr.lap_time_ms,lr.updated_at,
                            COALESCE(NULLIF(u.public_name,''), '匿名车手') AS driver,
                            ROW_NUMBER() OVER (
                                PARTITION BY lr.session_uuid
@@ -1561,7 +1562,8 @@ def public_leaderboard(public_id: str, limit: int = 20, cursor: str | None = Non
                 ),
                 best AS (SELECT * FROM candidates WHERE rn=1),
                 ranked AS (
-                    SELECT session_uuid,lap_number,lap_time_ms,updated_at,driver,
+                    SELECT session_uuid,session_public_id,
+                           lap_number,lap_time_ms,updated_at,driver,
                            RANK() OVER (ORDER BY lap_time_ms ASC) AS position
                     FROM best
                 )
@@ -1573,13 +1575,17 @@ def public_leaderboard(public_id: str, limit: int = 20, cursor: str | None = Non
         ).fetchall()
     more = len(rows) > limit
     rows = rows[:limit]
-    entries = [{
-        "rank": int(r["position"]),
-        "driver": r["driver"],
-        "lap_number": int(r["lap_number"]),
-        "lap_time_ms": int(r["lap_time_ms"]),
-        "updated_at": r["updated_at"],
-    } for r in rows]
+    entries = []
+    for r in rows:
+        entry = {
+            "rank": int(r["position"]),
+            "driver": r["driver"],
+            "lap_number": int(r["lap_number"]),
+            "lap_time_ms": int(r["lap_time_ms"]),
+            "updated_at": r["updated_at"],
+            "session_public_id": r["session_public_id"],
+        }
+        entries.append(entry)
     next_cursor = None
     if more and rows:
         last = rows[-1]
@@ -1592,6 +1598,68 @@ def public_leaderboard(public_id: str, limit: int = 20, cursor: str | None = Non
         "entries": entries,
         "next_cursor": next_cursor,
     }
+
+
+@router.get("/api/public/v1/tracks/{public_id}/sessions")
+def public_raw_sessions(public_id: str, limit: int = 20):
+    limit = max(1, min(int(limit), 50))
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT ss.public_id AS session_public_id,
+                      COALESCE(NULLIF(u.public_name,''), '匿名车手') AS driver,
+                      s.lap_count,s.best_time,ss.laps_public,ss.updated_at
+               FROM session_shares ss
+               JOIN sessions s ON s.device_uid=ss.device_uid AND s.session_uuid=ss.session_uuid
+               JOIN tracks t ON t.device_uid=s.device_uid AND t.track_uuid=s.track_uuid
+               JOIN track_shares ts ON ts.device_uid=t.device_uid AND ts.track_uuid=t.track_uuid
+               JOIN devices d ON d.uid=t.device_uid
+               LEFT JOIN users u ON u.id=d.owner_id
+               WHERE ts.public_id=? AND ts.is_public=1 AND ss.raw_public=1
+                 AND s.deleted=0 AND t.deleted=0 AND d.owner_id IS NOT NULL
+               ORDER BY ss.updated_at DESC, ss.public_id ASC LIMIT ?""",
+            (public_id, limit),
+        ).fetchall()
+    return {
+        "format": "racebrick-public-raw-sessions-v1",
+        "track_public_id": public_id,
+        "sessions": [{
+            "session_public_id": r["session_public_id"],
+            "driver": r["driver"],
+            "lap_count": int(r["lap_count"]) if r["laps_public"] else 0,
+            "best_time": r["best_time"] if r["laps_public"] else None,
+            "raw_public": True,
+            "updated_at": r["updated_at"],
+        } for r in rows],
+    }
+
+
+@router.get("/api/public/v1/tracks/{public_id}/sessions/{session_public_id}/raw")
+def public_raw_download(public_id: str, session_public_id: str,
+                        user: dict = Depends(current_user)):
+    with db() as conn:
+        row = conn.execute(
+            """SELECT s.csv,s.telemetry_hash
+               FROM session_shares ss
+               JOIN sessions s ON s.device_uid=ss.device_uid AND s.session_uuid=ss.session_uuid
+               JOIN tracks t ON t.device_uid=s.device_uid AND t.track_uuid=s.track_uuid
+               JOIN track_shares ts ON ts.device_uid=t.device_uid AND ts.track_uuid=t.track_uuid
+               JOIN devices d ON d.uid=t.device_uid
+               WHERE ts.public_id=? AND ts.is_public=1 AND ss.public_id=?
+                 AND ss.raw_public=1 AND s.deleted=0 AND t.deleted=0
+                 AND d.owner_id IS NOT NULL""",
+            (public_id, session_public_id),
+        ).fetchone()
+    if row is None or not row["csv"]:
+        raise HTTPException(404, "raw session not available")
+    csv_bytes = row["csv"].encode("utf-8")
+    headers = {
+        "Content-Disposition": f'attachment; filename="racebrick-{session_public_id}.csv"',
+        "X-RaceBrick-Raw-Version": "csv-v3",
+        "X-RaceBrick-Track-Public-Id": public_id,
+        "X-RaceBrick-Session-Public-Id": session_public_id,
+        "X-RaceBrick-SHA256": row["telemetry_hash"] or hashlib.sha256(csv_bytes).hexdigest(),
+    }
+    return Response(content=csv_bytes, media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @router.get("/api/platform/admin/users")

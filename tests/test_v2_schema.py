@@ -328,5 +328,70 @@ class V2SchemaTest(unittest.TestCase):
         self.assertEqual([e["lap_time_ms"] for e in board["entries"]], [2400])
 
 
+    def test_raw_download_requires_independent_authorization(self):
+        with platform.db() as conn:
+            owner = conn.execute(
+                "INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
+                ("raw-owner", platform._hash_password("password123"), "user", platform._now()),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO devices(uid,name,owner_id,created_at) VALUES(?,?,?,?)",
+                ("esp32s3-raw-test", "raw-test", owner, platform._now()),
+            )
+            track_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+            conn.execute(
+                """INSERT INTO tracks(device_uid,local_id,name,payload,content_hash,
+                   revision,deleted,updated_at,track_uuid,track_version)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                ("esp32s3-raw-test", 1, "Raw Track", '{"uuid":"%s"}' % track_uuid,
+                 "raw-track-hash", 1, 0, platform._now(), track_uuid, 1),
+            )
+            session_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+            csv = "Format,3\nSession title,\"Raw Track\"\n"
+            csv += "1795000000,0,1,0.1,31.0,121.0,20.0\n"
+            csv += "1795000001,0,1,0.2,31.0,121.0,21.0\n"
+            conn.execute(
+                """INSERT INTO sessions(device_uid,local_slot,payload,csv,content_hash,
+                   revision,deleted,updated_at,session_uuid,track_uuid,lap_count)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                ("esp32s3-raw-test", 1, "{}", csv, "raw-session-hash",
+                 1, 0, platform._now(), session_uuid, track_uuid, 1),
+            )
+            owner_user = {"id": owner, "username": "raw-owner", "role": "user"}
+
+        public_id = platform.set_track_sharing(
+            "esp32s3-raw-test", track_uuid,
+            platform.TrackShareBody(public=True), owner_user,
+        )["public_id"]
+        self.assertEqual(platform.public_raw_sessions(public_id)["sessions"], [])
+        with self.assertRaises(platform.HTTPException) as ctx:
+            platform.public_raw_download(public_id, "rbs_v1_missing", owner_user)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+        with platform.db() as conn:
+            share = platform.set_session_sharing(
+                "esp32s3-raw-test", session_uuid,
+                platform.SessionShareBody(raw_public=True), owner_user)
+        self.assertFalse(share["laps_public"])
+        self.assertTrue(share["raw_public"])
+        raw_sessions = platform.public_raw_sessions(public_id)
+        self.assertEqual(len(raw_sessions["sessions"]), 1)
+        raw_id = raw_sessions["sessions"][0]["session_public_id"]
+        response = platform.public_raw_download(public_id, raw_id, owner_user)
+        self.assertEqual(response.media_type, "text/csv; charset=utf-8")
+        self.assertEqual(response.headers["x-racebrick-raw-version"], "csv-v3")
+        self.assertIn(b"1795000000", bytes(response.body))
+        self.assertTrue(response.headers["x-racebrick-sha256"])
+
+        with platform.db() as conn:
+            platform.set_session_sharing(
+                "esp32s3-raw-test", session_uuid,
+                platform.SessionShareBody(raw_public=False), owner_user)
+        with self.assertRaises(platform.HTTPException) as ctx:
+            platform.public_raw_download(public_id, raw_id, owner_user)
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(platform.public_raw_sessions(public_id)["sessions"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
