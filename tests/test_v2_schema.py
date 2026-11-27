@@ -190,5 +190,74 @@ class V2SchemaTest(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
 
+    def test_public_catalog_visibility_download_and_pagination(self):
+        with platform.db() as conn:
+            owner = conn.execute(
+                "INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
+                ("public-owner", platform._hash_password("password123"), "user", platform._now()),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO devices(uid,name,owner_id,created_at) VALUES(?,?,?,?)",
+                ("esp32s3-public-test", "public-test", owner, platform._now()),
+            )
+            track_ids = []
+            for i in range(3):
+                track_uuid = f"8888888{i}-8888-4888-8888-88888888888{i}"
+                payload = {
+                    "uuid": track_uuid, "name": f"Public {i}", "geo": False,
+                    "length_m": 300 + i, "width": 5, "start_width": 10,
+                    "start_f": 0.1, "points": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+                }
+                conn.execute(
+                    """INSERT INTO tracks(device_uid,local_id,name,payload,content_hash,
+                       revision,deleted,updated_at,track_uuid,track_version)
+                       VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    ("esp32s3-public-test", i, f"Public {i}",
+                     platform._canonical(payload), f"hash-{i}", 1, 0,
+                     platform._now() + i, track_uuid, 1),
+                )
+                track_ids.append(track_uuid)
+
+        self.assertEqual(platform.public_tracks()["tracks"], [])
+
+        owner_user = {"id": owner, "username": "public-owner", "role": "user"}
+        with platform.db() as conn:
+            public_ids = [
+                platform.set_track_sharing(
+                    "esp32s3-public-test", uuid,
+                    platform.TrackShareBody(public=True), owner_user,
+                )["public_id"]
+                for uuid in track_ids
+            ]
+        self.assertTrue(all(pid.startswith("rbt_v1_") for pid in public_ids))
+
+        first = platform.public_tracks(limit=2)
+        self.assertEqual(len(first["tracks"]), 2)
+        self.assertIsNotNone(first["next_cursor"])
+        self.assertNotIn("device_uid", first["tracks"][0])
+        self.assertNotIn("local_id", first["tracks"][0])
+        second = platform.public_tracks(limit=2, cursor=first["next_cursor"])
+        self.assertEqual(len(second["tracks"]), 1)
+
+        detail = platform.public_track(public_ids[0])
+        self.assertEqual(detail["format"], platform.PUBLIC_TRACK_FORMAT)
+        self.assertEqual(detail["track"]["public_id"], public_ids[0])
+        self.assertEqual(detail["track"]["track_uuid"], track_ids[0])
+        self.assertNotIn("device_uid", detail["track"])
+        self.assertNotIn("local_id", detail["track"])
+        self.assertGreaterEqual(len(detail["track"]["points"]), 3)
+
+        with platform.db() as conn:
+            platform.set_track_sharing(
+                "esp32s3-public-test", track_ids[0],
+                platform.TrackShareBody(public=False), owner_user,
+            )
+        with self.assertRaises(platform.HTTPException) as ctx:
+            platform.public_track(public_ids[0])
+        self.assertEqual(ctx.exception.status_code, 404)
+        after = platform.public_tracks(limit=10)
+        self.assertNotIn(public_ids[0], [t["public_id"] for t in after["tracks"]])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1360,6 +1360,141 @@ def set_session_sharing(uid: str, session_uuid: str, body: SessionShareBody,
         }
 
 
+PUBLIC_TRACK_FORMAT = "racebrick-public-track-v1"
+
+
+def _public_cursor_encode(updated_at: int, public_id: str) -> str:
+    raw = f"{int(updated_at)}|{public_id}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _public_cursor_decode(cursor: str | None) -> tuple[int, str] | None:
+    if not cursor:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode("utf-8")
+        ts, public_id = raw.split("|", 1)
+        return int(ts), public_id
+    except Exception:
+        raise HTTPException(400, "invalid cursor")
+
+
+def _public_track_payload(payload: dict) -> dict:
+    def num(key: str, default: float = 0.0) -> float:
+        try:
+            value = float(payload.get(key, default) or default)
+            return value if math.isfinite(value) else default
+        except Exception:
+            return default
+
+    points = _point_pairs(payload)
+    if len(points) > 2000:
+        points = points[:2000]
+    sections = []
+    for value in (payload.get("sections") or [])[:16]:
+        try:
+            v = float(value)
+            if math.isfinite(v):
+                sections.append(v)
+        except Exception:
+            pass
+    geo = bool(payload.get("geo"))
+    out = {
+        "track_uuid": str(payload.get("uuid") or ""),
+        "name": str(payload.get("name") or "")[:48],
+        "geo": geo,
+        "length_m": num("length_m"),
+        "width": num("width", 5.0),
+        "start_f": max(0.0, min(0.9999, num("start_f"))),
+        "start_width": max(1.0, min(50.0, num("start_width", 10.0))),
+        "start_offset": max(-50.0, min(50.0, num("start_offset"))),
+        "reverse": bool(payload.get("reverse")),
+        "sections": sections,
+        "points": points,
+    }
+    if geo:
+        out.update({
+            "glat0": num("glat0"),
+            "glon0": num("glon0"),
+            "nscale": num("nscale"),
+            "nox": num("nox"),
+            "noy": num("noy"),
+        })
+    return out
+
+
+@router.get("/api/public/v1/tracks")
+def public_tracks(limit: int = 20, cursor: str | None = None):
+    limit = max(1, min(int(limit), 50))
+    after = _public_cursor_decode(cursor)
+    with db() as conn:
+        where = """WHERE ts.is_public=1 AND t.deleted=0 AND d.owner_id IS NOT NULL"""
+        args: list[Any] = []
+        if after is not None:
+            where += " AND (ts.updated_at < ? OR (ts.updated_at = ? AND ts.public_id > ?))"
+            args.extend([after[0], after[0], after[1]])
+        args.append(limit + 1)
+        rows = conn.execute(
+            f"""SELECT t.track_uuid,t.payload,ts.public_id,ts.updated_at
+                FROM track_shares ts
+                JOIN tracks t ON t.device_uid=ts.device_uid AND t.track_uuid=ts.track_uuid
+                JOIN devices d ON d.uid=t.device_uid
+                {where}
+                ORDER BY ts.updated_at DESC, ts.public_id ASC
+                LIMIT ?""",
+            args,
+        ).fetchall()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    tracks = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"])
+        except Exception:
+            payload = {}
+        tracks.append({
+            "public_id": r["public_id"],
+            "track_uuid": r["track_uuid"],
+            "name": str(payload.get("name") or "")[:48],
+            "geo": bool(payload.get("geo")),
+            "length_m": _public_track_payload(payload)["length_m"],
+            "updated_at": r["updated_at"],
+        })
+    next_cursor = None
+    if more and rows:
+        next_cursor = _public_cursor_encode(rows[-1]["updated_at"], rows[-1]["public_id"])
+    return {
+        "format": PUBLIC_TRACK_FORMAT,
+        "tracks": tracks,
+        "next_cursor": next_cursor,
+    }
+
+
+@router.get("/api/public/v1/tracks/{public_id}")
+def public_track(public_id: str):
+    with db() as conn:
+        row = conn.execute(
+            """SELECT t.track_uuid,t.payload,ts.public_id,ts.updated_at
+               FROM track_shares ts
+               JOIN tracks t ON t.device_uid=ts.device_uid AND t.track_uuid=ts.track_uuid
+               JOIN devices d ON d.uid=t.device_uid
+               WHERE ts.public_id=? AND ts.is_public=1
+                 AND t.deleted=0 AND d.owner_id IS NOT NULL""",
+            (public_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "public track not found")
+    try:
+        payload = json.loads(row["payload"])
+    except Exception:
+        payload = {}
+    track = _public_track_payload(payload)
+    track["track_uuid"] = row["track_uuid"]
+    track["public_id"] = row["public_id"]
+    track["updated_at"] = row["updated_at"]
+    return {"format": PUBLIC_TRACK_FORMAT, "track": track}
+
+
 @router.get("/api/platform/admin/users")
 def admin_users(user: dict = Depends(admin_user)):
     with db() as conn:
