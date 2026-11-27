@@ -106,6 +106,7 @@ def _init_db() -> None:
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
+                public_name TEXT,
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS auth_tokens (
@@ -254,7 +255,26 @@ def _init_db() -> None:
                 deleted INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(device_uid, chunk_id)
             );
+            CREATE TABLE IF NOT EXISTS track_shares (
+                device_uid TEXT NOT NULL,
+                track_uuid TEXT NOT NULL,
+                public_id TEXT NOT NULL UNIQUE,
+                is_public INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(device_uid, track_uuid)
+            );
+            CREATE TABLE IF NOT EXISTS session_shares (
+                device_uid TEXT NOT NULL,
+                session_uuid TEXT NOT NULL,
+                public_id TEXT NOT NULL UNIQUE,
+                laps_public INTEGER NOT NULL DEFAULT 0,
+                raw_public INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(device_uid, session_uuid)
+            );
             CREATE INDEX IF NOT EXISTS idx_tracks_dev_rev ON tracks(device_uid, revision);
+            CREATE INDEX IF NOT EXISTS idx_track_shares_public ON track_shares(is_public, updated_at, public_id);
+            CREATE INDEX IF NOT EXISTS idx_session_shares_public ON session_shares(laps_public, updated_at, public_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_dev_rev ON sessions(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_logs_dev_rev ON race_logs(device_uid, revision);
             CREATE INDEX IF NOT EXISTS idx_commands_dev ON commands(device_uid, status);
@@ -272,6 +292,9 @@ def _init_db() -> None:
                 if name not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
+        ensure_cols("users", {
+            "public_name": "TEXT",
+        })
         ensure_cols("tracks", {
             "track_uuid": "TEXT", "revision_id": "TEXT",
             "parent_revision_id": "TEXT", "track_version": "INTEGER NOT NULL DEFAULT 1",
@@ -439,6 +462,15 @@ class TrackEditBody(BaseModel):
     start_width: float | None = None
     start_offset: float | None = None
     reverse: bool | None = None
+
+
+class TrackShareBody(BaseModel):
+    public: bool
+
+
+class SessionShareBody(BaseModel):
+    laps_public: bool | None = None
+    raw_public: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1072,6 +1104,19 @@ def _owned_device(conn: sqlite3.Connection, uid: str, user: dict) -> sqlite3.Row
     return row
 
 
+def _strict_owned_device(conn: sqlite3.Connection, uid: str, user: dict) -> sqlite3.Row:
+    row = _get_device(conn, uid)
+    if row is None:
+        raise HTTPException(404, "device not found")
+    if row["owner_id"] != user["id"]:
+        raise HTTPException(403, "device owner required")
+    return row
+
+
+def _new_public_id(prefix: str) -> str:
+    return f"{prefix}_v1_{uuid.uuid4().hex}"
+
+
 @router.get("/api/platform/devices/{uid}")
 def device_detail(uid: str, user: dict = Depends(current_user)):
     with db() as conn:
@@ -1169,6 +1214,150 @@ def edit_track(uid: str, local_id: int, body: TrackEditBody, user: dict = Depend
         return {"ok": True, "revision": rev, "data_version": dv, "track": _track_view(
             conn.execute("SELECT * FROM tracks WHERE id=?", (row["id"],)).fetchone()
         )}
+
+
+@router.get("/api/platform/devices/{uid}/sharing")
+def device_sharing(uid: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        _strict_owned_device(conn, uid, user)
+        tracks = conn.execute(
+            """SELECT t.local_id,t.track_uuid,t.name,
+                      s.public_id,s.is_public,s.updated_at
+               FROM tracks t LEFT JOIN track_shares s
+                 ON s.device_uid=t.device_uid AND s.track_uuid=t.track_uuid
+               WHERE t.device_uid=? AND t.deleted=0
+               ORDER BY t.local_id""",
+            (uid,),
+        ).fetchall()
+        sessions = conn.execute(
+            """SELECT s.local_slot,s.session_uuid,s.track_name,
+                      sh.public_id,sh.laps_public,sh.raw_public,sh.updated_at
+               FROM sessions s LEFT JOIN session_shares sh
+                 ON sh.device_uid=s.device_uid AND sh.session_uuid=s.session_uuid
+               WHERE s.device_uid=? AND s.deleted=0
+               ORDER BY s.local_slot""",
+            (uid,),
+        ).fetchall()
+        return {
+            "device_uid": uid,
+            "tracks": [{
+                "track_uuid": r["track_uuid"],
+                "local_id": r["local_id"],
+                "name": r["name"],
+                "is_public": bool(r["is_public"]),
+                "public_id": r["public_id"],
+                "updated_at": r["updated_at"],
+            } for r in tracks],
+            "sessions": [{
+                "session_uuid": r["session_uuid"],
+                "local_slot": r["local_slot"],
+                "track_name": r["track_name"],
+                "laps_public": bool(r["laps_public"]),
+                "raw_public": bool(r["raw_public"]),
+                "public_id": r["public_id"],
+                "updated_at": r["updated_at"],
+            } for r in sessions],
+        }
+
+
+@router.patch("/api/platform/devices/{uid}/tracks/{track_uuid}/sharing")
+def set_track_sharing(uid: str, track_uuid: str, body: TrackShareBody,
+                      user: dict = Depends(current_user)):
+    with db() as conn:
+        _strict_owned_device(conn, uid, user)
+        row = conn.execute(
+            """SELECT t.track_uuid,t.name,s.public_id,s.is_public,s.updated_at
+               FROM tracks t LEFT JOIN track_shares s
+                 ON s.device_uid=t.device_uid AND s.track_uuid=t.track_uuid
+               WHERE t.device_uid=? AND t.track_uuid=? AND t.deleted=0""",
+            (uid, track_uuid),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "track not found")
+        existing = row["public_id"] is not None
+        if not existing and body.public:
+            public_id = _new_public_id("rbt")
+            now = _now()
+            conn.execute(
+                """INSERT INTO track_shares(device_uid,track_uuid,public_id,is_public,updated_at)
+                   VALUES(?,?,?,?,?)""",
+                (uid, track_uuid, public_id, 1, now),
+            )
+        elif existing:
+            public_id = row["public_id"]
+            if not public_id:
+                public_id = _new_public_id("rbt")
+            if bool(row["is_public"]) != body.public or not row["public_id"]:
+                conn.execute(
+                    """UPDATE track_shares SET public_id=?,is_public=?,updated_at=?
+                       WHERE device_uid=? AND track_uuid=?""",
+                    (public_id, 1 if body.public else 0, _now(), uid, track_uuid),
+                )
+        else:
+            public_id = None
+        r = conn.execute(
+            """SELECT public_id,is_public,updated_at FROM track_shares
+               WHERE device_uid=? AND track_uuid=?""",
+            (uid, track_uuid),
+        ).fetchone()
+        return {
+            "ok": True,
+            "track_uuid": track_uuid,
+            "is_public": bool(r["is_public"]) if r else False,
+            "public_id": r["public_id"] if r else None,
+            "updated_at": r["updated_at"] if r else None,
+        }
+
+
+@router.patch("/api/platform/devices/{uid}/sessions/{session_uuid}/sharing")
+def set_session_sharing(uid: str, session_uuid: str, body: SessionShareBody,
+                        user: dict = Depends(current_user)):
+    if body.laps_public is None and body.raw_public is None:
+        raise HTTPException(400, "laps_public or raw_public required")
+    with db() as conn:
+        _strict_owned_device(conn, uid, user)
+        row = conn.execute(
+            """SELECT s.session_uuid,sh.public_id,sh.laps_public,sh.raw_public,sh.updated_at
+               FROM sessions s LEFT JOIN session_shares sh
+                 ON sh.device_uid=s.device_uid AND sh.session_uuid=s.session_uuid
+               WHERE s.device_uid=? AND s.session_uuid=? AND s.deleted=0""",
+            (uid, session_uuid),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "session not found")
+        laps = body.laps_public if body.laps_public is not None else bool(row["laps_public"])
+        raw = body.raw_public if body.raw_public is not None else bool(row["raw_public"])
+        existing = row["public_id"] is not None
+        if not existing and (laps or raw):
+            public_id = _new_public_id("rbs")
+            now = _now()
+            conn.execute(
+                """INSERT INTO session_shares
+                   (device_uid,session_uuid,public_id,laps_public,raw_public,updated_at)
+                   VALUES(?,?,?,?,?,?)""",
+                (uid, session_uuid, public_id, 1 if laps else 0, 1 if raw else 0, now),
+            )
+        elif existing:
+            public_id = row["public_id"] or _new_public_id("rbs")
+            if bool(row["laps_public"]) != laps or bool(row["raw_public"]) != raw or not row["public_id"]:
+                conn.execute(
+                    """UPDATE session_shares SET public_id=?,laps_public=?,raw_public=?,updated_at=?
+                       WHERE device_uid=? AND session_uuid=?""",
+                    (public_id, 1 if laps else 0, 1 if raw else 0, _now(), uid, session_uuid),
+                )
+        r = conn.execute(
+            """SELECT public_id,laps_public,raw_public,updated_at FROM session_shares
+               WHERE device_uid=? AND session_uuid=?""",
+            (uid, session_uuid),
+        ).fetchone()
+        return {
+            "ok": True,
+            "session_uuid": session_uuid,
+            "laps_public": bool(r["laps_public"]) if r else False,
+            "raw_public": bool(r["raw_public"]) if r else False,
+            "public_id": r["public_id"] if r else None,
+            "updated_at": r["updated_at"] if r else None,
+        }
 
 
 @router.get("/api/platform/admin/users")

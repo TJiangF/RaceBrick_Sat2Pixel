@@ -102,5 +102,93 @@ class V2SchemaTest(unittest.TestCase):
             self.assertEqual(manifest["sessions"][0]["track_revision_id"], revision_id)
 
 
+    def test_sharing_defaults_private_and_owner_scoped(self):
+        def make_user(name):
+            with platform.db() as conn:
+                cur = conn.execute(
+                    "INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
+                    (name, platform._hash_password("password123"), "user", platform._now()),
+                )
+                return cur.lastrowid
+
+        owner_id = make_user("share-owner")
+        other_id = make_user("share-other")
+        admin_id = make_user("share-admin")
+        owner = {"id": owner_id, "username": "share-owner", "role": "user"}
+        other = {"id": other_id, "username": "share-other", "role": "user"}
+        admin = {"id": admin_id, "username": "share-admin", "role": "admin"}
+        uid = "esp32s3-share-test"
+        track_uuid = "66666666-6666-4666-8666-666666666666"
+        session_uuid = "77777777-7777-4777-8777-777777777777"
+        with platform.db() as conn:
+            conn.execute(
+                "INSERT INTO devices(uid,name,owner_id,created_at) VALUES(?,?,?,?)",
+                (uid, "share-test", owner_id, platform._now()),
+            )
+            conn.execute(
+                """INSERT INTO tracks(device_uid,local_id,name,payload,content_hash,
+                   revision,deleted,updated_at,track_uuid,track_version)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (uid, 1, "Share Track", '{}', "track-hash", 1, 0,
+                 platform._now(), track_uuid, 1),
+            )
+            conn.execute(
+                """INSERT INTO sessions(device_uid,local_slot,payload,csv,content_hash,
+                   revision,deleted,updated_at,session_uuid,lap_count)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (uid, 1, '{}', "", "session-hash", 1, 0,
+                 platform._now(), session_uuid, 0),
+            )
+
+        with platform.db() as conn:
+            view = platform.device_sharing(uid, owner)
+            self.assertEqual(view["tracks"][0]["is_public"], False)
+            self.assertIsNone(view["tracks"][0]["public_id"])
+            self.assertEqual(view["sessions"][0]["laps_public"], False)
+            self.assertEqual(view["sessions"][0]["raw_public"], False)
+
+        with self.assertRaises(platform.HTTPException) as ctx:
+            platform.device_sharing(uid, other)
+        self.assertEqual(ctx.exception.status_code, 403)
+        with self.assertRaises(platform.HTTPException) as ctx:
+            platform.device_sharing(uid, admin)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+        with platform.db() as conn:
+            first = platform.set_track_sharing(
+                uid, track_uuid, platform.TrackShareBody(public=True), owner)
+            second = platform.set_track_sharing(
+                uid, track_uuid, platform.TrackShareBody(public=True), owner)
+            self.assertTrue(first["is_public"])
+            self.assertTrue(first["public_id"].startswith("rbt_v1_"))
+            self.assertEqual(first["public_id"], second["public_id"])
+
+            laps = platform.set_session_sharing(
+                uid, session_uuid, platform.SessionShareBody(laps_public=True), owner)
+            self.assertTrue(laps["laps_public"])
+            self.assertFalse(laps["raw_public"])
+            raw = platform.set_session_sharing(
+                uid, session_uuid, platform.SessionShareBody(raw_public=True), owner)
+            self.assertTrue(raw["laps_public"])
+            self.assertTrue(raw["raw_public"])
+            self.assertTrue(raw["public_id"].startswith("rbs_v1_"))
+
+            off = platform.set_track_sharing(
+                uid, track_uuid, platform.TrackShareBody(public=False), owner)
+            self.assertFalse(off["is_public"])
+            self.assertEqual(first["public_id"], off["public_id"])
+            session_off = platform.set_session_sharing(
+                uid, session_uuid,
+                platform.SessionShareBody(laps_public=False, raw_public=False), owner)
+            self.assertFalse(session_off["laps_public"])
+            self.assertFalse(session_off["raw_public"])
+            self.assertEqual(raw["public_id"], session_off["public_id"])
+
+        with self.assertRaises(platform.HTTPException) as ctx:
+            platform.set_track_sharing(
+                uid, track_uuid, platform.TrackShareBody(public=True), other)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
